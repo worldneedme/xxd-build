@@ -1,0 +1,14 @@
+//go:build windows
+
+package outbound
+
+import (
+	"os/exec"
+	"syscall"
+)
+
+// setHideWindow hides the console window on Windows so helper processes
+// run silently in the background without a visible terminal.
+func setHideWindow(cmd *exec.Cmd) {
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+}

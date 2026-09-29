@@ -1,0 +1,9 @@
+//go:build !windows
+
+package outbound
+
+import "os/exec"
+
+// setHideWindow is a no-op on non-Windows platforms (Android, Linux, macOS).
+// There is no concept of a "hidden window" on these systems.
+func setHideWindow(cmd *exec.Cmd) {}
