@@ -1,0 +1,26 @@
+name: Build WONDERX V1 from private source
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Private V1 branch, tag, or commit to build
+        required: true
+        type: string
+      release_tag:
+        description: Public xxd-build Release tag
+        required: true
+        type: string
+        default: custom-v0.8.98-nd9
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    uses: worldneedme/xxdmanfl0609/.github/workflows/build.yaml@feat/new-design-0.8.98
+    with:
+      source_ref: ${{ inputs.source_ref }}
+      release_tag: ${{ inputs.release_tag }}
+    secrets:
+      SOURCE_READ_KEY: ${{ secrets.SOURCE_READ_KEY }}
