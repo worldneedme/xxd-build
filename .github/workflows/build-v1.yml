@@ -1,4 +1,4 @@
-name: Build WONDERX V1 from private source
+name: Build WONDERX V1 Windows from private source
 
 on:
   workflow_dispatch:
@@ -16,12 +16,166 @@ on:
 permissions:
   contents: write
 
+env:
+  FLUTTER_VERSION: '3.47.1'
+  GO_VERSION: '1.26.4'
+
 jobs:
   build:
-    uses: worldneedme/xxdmanfl0609/.github/workflows/build.yaml@feat/new-design-0.8.98
-    with:
-      source_ref: ${{ inputs.source_ref }}
-      release_tag: ${{ inputs.release_tag }}
-      platform: windows
-    secrets:
-      SOURCE_READ_KEY: ${{ secrets.SOURCE_READ_KEY }}
+    name: Build Windows amd64
+    runs-on: windows-2022
+    env:
+      IS_TAG: 'true'
+      IS_STABLE: ${{ !contains(inputs.release_tag, '-') }}
+    steps:
+      - name: Validate release tag
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+            echo "Invalid release tag: $RELEASE_TAG" >&2
+            exit 1
+          fi
+
+      - name: Checkout private V1 source
+        uses: actions/checkout@v4
+        with:
+          repository: worldneedme/xxdmanfl0609
+          ref: ${{ inputs.source_ref }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          persist-credentials: false
+
+      - name: Check Rust helper
+        run: |
+          cargo fmt --manifest-path services/helper/Cargo.toml -- --check
+          cargo test --manifest-path services/helper/Cargo.toml --features windows-service
+
+      - name: Enable Git long paths
+        run: git config --global core.longpaths true
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: |
+            core/go.sum
+            core/Clash.Meta/go.sum
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: master
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Install Flutter dependencies
+        run: |
+          flutter --version
+          flutter pub get
+
+      - name: Package Windows
+        run: dart setup.dart windows ${{ env.IS_STABLE == 'true' && '--env stable' || '' }} -v
+
+      - name: Verify package outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d ./dist
+          find ./dist -type f | sort
+          setup=$(find ./dist -name '*-windows-*-setup.exe' -print -quit)
+          archive=$(find ./dist -name '*-windows-*.zip' -print -quit)
+          test -n "$setup"
+          test -n "$archive"
+          python .github/scripts/check_windows_package.py "$archive"
+
+      - name: Windows startup smoke
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zip = Get-ChildItem -Path '.\dist' -Recurse -Filter '*-windows-*.zip' | Select-Object -First 1
+          if (-not $zip) { throw 'Windows ZIP was not produced.' }
+          $root = Join-Path (Get-Location).Path 'smoke'
+          Expand-Archive -LiteralPath $zip.FullName -DestinationPath $root -Force
+          $exe = Join-Path $root 'FlClash.exe'
+          foreach ($required in @('FlClash.exe', 'FlClashCore.exe', 'manifest.json', 'protocol-helpers\naive.exe')) {
+            if (-not (Test-Path (Join-Path $root $required))) { throw "$required is missing" }
+          }
+          if (Test-Path (Join-Path $root 'protocol-helpers\juicity-client.exe')) {
+            throw 'Juicity must be native and must not ship as a helper executable.'
+          }
+          $process = Start-Process -FilePath $exe -WorkingDirectory $root -WindowStyle Hidden -PassThru
+          Start-Sleep -Seconds 12
+          $process.Refresh()
+          if ($process.HasExited -and $process.ExitCode -ne 0) {
+            throw "FlClash.exe exited during smoke with code $($process.ExitCode)"
+          }
+          Get-Process -Name FlClash,FlClashCore -ErrorAction SilentlyContinue |
+            Where-Object { $_.Path -and $_.Path.StartsWith($root, [StringComparison]::OrdinalIgnoreCase) } |
+            Stop-Process -Force -ErrorAction SilentlyContinue
+
+      - name: Generate checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd ./dist
+          out='SHA256SUMS-windows.txt'
+          : > "$out"
+          find . -type f \( -name '*.exe' -o -name '*.zip' \) -print0 |
+            while IFS= read -r -d '' file; do
+              printf '%s  %s\n' "$(sha256sum "$file" | cut -d' ' -f1)" "$(basename "$file")" >> "$out"
+            done
+          test -s "$out"
+          cat "$out"
+
+      - name: Publish Windows packages
+        uses: softprops/action-gh-release@v2
+        with:
+          name: WONDERX V1 ${{ inputs.release_tag }}
+          repository: worldneedme/xxd-build
+          token: ${{ github.token }}
+          tag_name: ${{ inputs.release_tag }}
+          target_commitish: main
+          files: |
+            ./dist/**/*.exe
+            ./dist/**/*.zip
+            ./dist/SHA256SUMS-windows.txt
+          fail_on_unmatched_files: false
+
+  release-notes:
+    name: Release notes
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout private V1 source
+        uses: actions/checkout@v4
+        with:
+          repository: worldneedme/xxdmanfl0609
+          ref: ${{ inputs.source_ref }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Generate release notes
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+            echo "Invalid release tag: $RELEASE_TAG" >&2
+            exit 1
+          fi
+          previous_tag=$(curl -fsSL "https://api.github.com/repos/${{ github.repository }}/releases/latest" | sed -nE 's/.*"tag_name": "([^"]+)".*/\1/p' | head -1 || true)
+          bash .github/scripts/generate_release_notes.sh "$previous_tag" release.md
+          version=$(printf '%s' "$RELEASE_TAG" | sed 's/^v//')
+          sed "s|VERSION|$version|g" .github/release_template.md >> release.md
+
+      - name: Update release notes
+        uses: softprops/action-gh-release@v2
+        with:
+          name: WONDERX V1 ${{ inputs.release_tag }}
+          repository: worldneedme/xxd-build
+          token: ${{ github.token }}
+          tag_name: ${{ inputs.release_tag }}
+          target_commitish: main
+          body_path: release.md
