@@ -257,6 +257,13 @@ extension AppShapeThemeExt on ThemeData {
         thickness: hairline,
         space: hairline,
       ),
+      // Title bar shares the page surface: no grey band, no scroll tint.
+      appBarTheme: appBarTheme.copyWith(
+        backgroundColor: colorScheme.surface,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+      ),
       cardTheme: cardTheme.copyWith(
         elevation: 0,
         color: colorScheme.surfaceContainerLow,
@@ -315,6 +322,9 @@ extension AppShapeThemeExt on ThemeData {
       ),
       navigationRailTheme: navigationRailTheme.copyWith(
         indicatorShape: AppShape.full,
+        indicatorColor: colorScheme.primary.withValues(alpha: 0.14),
+        selectedIconTheme: IconThemeData(color: colorScheme.primary),
+        unselectedIconTheme: IconThemeData(color: colorScheme.onSurfaceVariant),
       ),
       progressIndicatorTheme: progressIndicatorTheme.copyWith(
         borderRadius: AppRadius.full,

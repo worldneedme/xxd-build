@@ -22,12 +22,12 @@ class AuroraBackground extends StatelessWidget {
           fit: StackFit.expand,
           children: [
             Positioned(
-              top: -140,
-              left: -100,
+              top: -120,
+              left: -180,
               child: _Glow(
                 color: colorScheme.primary,
-                size: 420,
-                alpha: isDark ? 0.22 : 0.14,
+                size: 540,
+                alpha: isDark ? 0.24 : 0.20,
               ),
             ),
             Positioned(
@@ -36,7 +36,7 @@ class AuroraBackground extends StatelessWidget {
               child: _Glow(
                 color: colorScheme.tertiary,
                 size: 460,
-                alpha: isDark ? 0.18 : 0.11,
+                alpha: isDark ? 0.18 : 0.14,
               ),
             ),
             Positioned(
@@ -45,7 +45,7 @@ class AuroraBackground extends StatelessWidget {
               child: _Glow(
                 color: colorScheme.secondary,
                 size: 320,
-                alpha: isDark ? 0.14 : 0.09,
+                alpha: isDark ? 0.16 : 0.14,
               ),
             ),
             child,
@@ -85,7 +85,7 @@ class _Glow extends StatelessWidget {
 class GlassPanel extends StatelessWidget {
   const GlassPanel({
     super.key,
-    this.radius = AppCorner.xxl,
+    this.radius = AppCorner.lg,
     this.blurSigma = 20,
     this.margin = EdgeInsets.zero,
     required this.child,
@@ -106,7 +106,7 @@ class GlassPanel extends StatelessWidget {
         Positioned.fill(
           child: ColoredBox(
             color: (isDark ? colorScheme.surfaceContainerHigh : Colors.white)
-                .withValues(alpha: isDark ? 0.52 : 0.62),
+                .withValues(alpha: isDark ? 0.52 : 0.72),
           ),
         ),
         // Specular rim + top sheen, or the panel reads as fog instead of glass.
@@ -117,15 +117,18 @@ class GlassPanel extends StatelessWidget {
                 shape: RoundedSuperellipseBorder(
                   borderRadius: borderRadius,
                   side: BorderSide(
-                    color: Colors.white.withValues(alpha: isDark ? 0.14 : 0.55),
+                    color: isDark
+                        ? Colors.white.withValues(alpha: 0.14)
+                        : Colors.black.withValues(alpha: 0.07),
                     width: hairline,
                   ),
                 ),
                 gradient: LinearGradient(
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
+                  stops: const [0.0, 0.35],
                   colors: [
-                    Colors.white.withValues(alpha: isDark ? 0.10 : 0.28),
+                    Colors.white.withValues(alpha: isDark ? 0.10 : 0.40),
                     Colors.white.withValues(alpha: 0),
                   ],
                 ),
@@ -143,10 +146,16 @@ class GlassPanel extends StatelessWidget {
           shape: RoundedSuperellipseBorder(borderRadius: borderRadius),
           shadows: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: isDark ? 0.42 : 0.18),
-              blurRadius: 28,
-              offset: const Offset(0, 12),
+              color: Colors.black.withValues(alpha: isDark ? 0.36 : 0.07),
+              blurRadius: isDark ? 28.0 : 24.0,
+              offset: Offset(0, isDark ? 10.0 : 6.0),
             ),
+            if (!isDark)
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.04),
+                blurRadius: 2,
+                offset: const Offset(0, 1),
+              ),
           ],
         ),
         child: ClipRSuperellipse(
