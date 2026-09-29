@@ -10,6 +10,7 @@ import 'package:fl_clash/models/models.dart';
 import 'package:material_ui/material_ui.dart';
 
 const appName = 'FlClash';
+const brandName = 'WONDERX';
 const displayAppName = '𝙒𝙊𝙉𝘿𝙀𝙍𝙓 V1';
 const appHelperService = 'FlClashHelperService';
 const coreManifestName = 'manifest.json';

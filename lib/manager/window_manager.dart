@@ -430,12 +430,7 @@ class WindowHeaderBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      shape: Border(
-        bottom: BorderSide(
-          color: context.colorScheme.outlineVariant,
-          width: hairline,
-        ),
-      ),
+      type: MaterialType.transparency,
       child: SizedBox(
         height: height,
         child: Stack(
