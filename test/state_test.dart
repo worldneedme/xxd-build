@@ -32,22 +32,28 @@ void main() {
 
     final variant = container.read(themeSettingProvider).schemeVariant;
 
+    // Accents follow the seed; surfaces stay on the WONDERX house tiers.
+    final light = container.read(genColorSchemeProvider(Brightness.light));
     expect(
-      container.read(genColorSchemeProvider(Brightness.light)),
+      light.primary,
       ColorScheme.fromSeed(
         seedColor: lightSeed,
         brightness: Brightness.light,
         dynamicSchemeVariant: variant,
-      ),
+      ).primary,
     );
+    expect(light.surface, const Color(0xFFFBFBFC));
+
+    final dark = container.read(genColorSchemeProvider(Brightness.dark));
     expect(
-      container.read(genColorSchemeProvider(Brightness.dark)),
+      dark.primary,
       ColorScheme.fromSeed(
         seedColor: darkSeed,
         brightness: Brightness.dark,
         dynamicSchemeVariant: variant,
-      ),
+      ).primary,
     );
+    expect(dark.surface, const Color(0xFF0A0C14));
   });
 
   test('genColorScheme falls back to the accent color without a seed', () {
@@ -58,15 +64,17 @@ void main() {
         .read(dynamicColorProvider.notifier)
         .seed(lightSeed: null, darkSeed: null, accentColor: accent);
 
+    final scheme = container.read(genColorSchemeProvider(Brightness.light));
     expect(
-      container.read(genColorSchemeProvider(Brightness.light)),
+      scheme.primary,
       ColorScheme.fromSeed(
         seedColor: accent,
         brightness: Brightness.light,
         dynamicSchemeVariant: container
             .read(themeSettingProvider)
             .schemeVariant,
-      ),
+      ).primary,
     );
+    expect(scheme.surface, const Color(0xFFFBFBFC));
   });
 }
