@@ -22,5 +22,6 @@ jobs:
     with:
       source_ref: ${{ inputs.source_ref }}
       release_tag: ${{ inputs.release_tag }}
+      platform: windows
     secrets:
       SOURCE_READ_KEY: ${{ secrets.SOURCE_READ_KEY }}
