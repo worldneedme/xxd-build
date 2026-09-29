@@ -30,15 +30,23 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
     steps:
-      - name: Validate requested platform
+      - name: Plan requested platforms
+        id: plan
         env:
           BUILD_PLATFORM: ${{ inputs.platform }}
         run: |
+          android='{"platform":"android","os":"ubuntu-latest","arch":"arm64-v8a","android_arch":"arm64"}'
+          windows='{"platform":"windows","os":"windows-2022","arch":"amd64"}'
           case "$BUILD_PLATFORM" in
-            windows|android|all) ;;
+            all) include="$android,$windows" ;;
+            android) include="$android" ;;
+            windows) include="$windows" ;;
             *) echo "Unsupported build platform: $BUILD_PLATFORM" >&2; exit 1 ;;
           esac
+          echo "matrix={\"include\":[$include]}" >> "$GITHUB_OUTPUT"
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -134,22 +142,13 @@ jobs:
 
   build:
     name: Build ${{ matrix.platform }} ${{ matrix.arch }}
-    if: ${{ inputs.platform == 'all' || inputs.platform == matrix.platform }}
     needs: [test, windows-helper-test]
     runs-on: ${{ matrix.os }}
     env:
       IS_STABLE: ${{ !contains(inputs.release_tag, '-') }}
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - platform: android
-            os: ubuntu-latest
-            arch: arm64-v8a
-            android_arch: arm64
-          - platform: windows
-            os: windows-2022
-            arch: amd64
+      matrix: ${{ fromJSON(needs.test.outputs.matrix) }}
 
     steps:
       - name: Checkout
