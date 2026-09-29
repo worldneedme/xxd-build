@@ -517,10 +517,16 @@ class ListHeader extends StatelessWidget {
                   title,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: context.textTheme.labelLarge?.copyWith(
-                    color: context.colorScheme.onSurfaceVariant.opacity80,
-                    fontWeight: FontWeight.w600,
-                  ),
+                  style: system.isDesktop
+                      ? context.textTheme.labelMedium?.copyWith(
+                          color: context.colorScheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 0.4,
+                        )
+                      : context.textTheme.labelLarge?.copyWith(
+                          color: context.colorScheme.onSurfaceVariant.opacity80,
+                          fontWeight: FontWeight.w600,
+                        ),
                 ),
                 if (subTitle != null)
                   Text(
@@ -543,6 +549,10 @@ class ListHeader extends StatelessWidget {
   }
 }
 
+final _sectionDivider = system.isDesktop
+    ? const Divider(height: 0, indent: 16, endIndent: 16)
+    : const Divider(height: 0);
+
 List<Widget> generateSection({
   String? title,
   required Iterable<Widget> items,
@@ -550,9 +560,7 @@ List<Widget> generateSection({
   bool isFirst = false,
   bool separated = true,
 }) {
-  final genItems = separated
-      ? items.separated(const Divider(height: 0))
-      : items;
+  final genItems = separated ? items.separated(_sectionDivider) : items;
   return [
     if (items.isNotEmpty && title != null)
       ListHeader(
@@ -623,9 +631,7 @@ List<Widget> generateInfoSection({
   List<Widget>? actions,
   bool separated = true,
 }) {
-  final genItems = separated
-      ? items.separated(const Divider(height: 0))
-      : items;
+  final genItems = separated ? items.separated(_sectionDivider) : items;
   return [
     if (items.isNotEmpty) InfoHeader(info: info, actions: actions),
     ...genItems,

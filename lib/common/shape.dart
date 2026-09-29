@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 import 'dart:ui' show ClipOp, lerpDouble;
 
+import 'package:fl_clash/common/system.dart';
 import 'package:material_ui/material_ui.dart';
 
 abstract final class AppCorner {
@@ -263,6 +264,25 @@ extension AppShapeThemeExt on ThemeData {
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         scrolledUnderElevation: 0,
+        titleTextStyle: system.isDesktop
+            ? textTheme.titleLarge?.copyWith(
+                color: colorScheme.onSurface,
+                fontSize: 20,
+                fontWeight: FontWeight.w600,
+                letterSpacing: -0.2,
+              )
+            : null,
+      ),
+      scrollbarTheme: scrollbarTheme.copyWith(
+        thumbColor: WidgetStateProperty.resolveWith(
+          (states) => colorScheme.onSurface.withValues(
+            alpha:
+                states.contains(WidgetState.hovered) ||
+                    states.contains(WidgetState.dragged)
+                ? 0.34
+                : 0.18,
+          ),
+        ),
       ),
       cardTheme: cardTheme.copyWith(
         elevation: 0,
