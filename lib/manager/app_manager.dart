@@ -309,35 +309,87 @@ class _SidebarBrand extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final icon = ClipRSuperellipse(
-      borderRadius: AppRadius.all(8),
+      borderRadius: AppRadius.all(6),
       child: Image.asset(
         'assets/images/icon.png',
-        width: 30,
-        height: 30,
+        width: 22,
+        height: 22,
         fit: BoxFit.cover,
       ),
     );
     if (!extended) {
-      return icon;
+      return Center(child: icon);
     }
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 22),
+      padding: const EdgeInsetsDirectional.only(start: 23, end: 12),
       child: Row(
         children: [
           icon,
-          const SizedBox(width: 10),
+          const SizedBox(width: 9),
           Expanded(
             child: Text(
               brandName,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: context.textTheme.titleSmall?.copyWith(
+              style: context.textTheme.labelLarge?.copyWith(
                 fontWeight: FontWeight.w700,
-                letterSpacing: 0.6,
+                letterSpacing: 0.8,
               ),
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _SidebarResizeHandle extends StatefulWidget {
+  const _SidebarResizeHandle({
+    required this.active,
+    required this.onStart,
+    required this.onUpdate,
+    required this.onEnd,
+  });
+
+  final bool active;
+  final VoidCallback onStart;
+  final ValueChanged<double> onUpdate;
+  final VoidCallback onEnd;
+
+  @override
+  State<_SidebarResizeHandle> createState() => _SidebarResizeHandleState();
+}
+
+class _SidebarResizeHandleState extends State<_SidebarResizeHandle> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final visible = _hovered || widget.active;
+    return MouseRegion(
+      cursor: SystemMouseCursors.resizeColumn,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onHorizontalDragStart: (_) => widget.onStart(),
+        onHorizontalDragUpdate: (details) => widget.onUpdate(details.delta.dx),
+        onHorizontalDragEnd: (_) => widget.onEnd(),
+        onHorizontalDragCancel: widget.onEnd,
+        child: Align(
+          alignment: AlignmentDirectional.centerEnd,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            width: 2,
+            margin: const EdgeInsets.symmetric(vertical: 12),
+            decoration: BoxDecoration(
+              color: visible
+                  ? context.colorScheme.primary.withValues(alpha: 0.45)
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(1),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -384,22 +436,88 @@ class _ContentSheet extends StatelessWidget {
   }
 }
 
-class AppSidebarContainer extends ConsumerWidget {
+class AppSidebarContainer extends ConsumerStatefulWidget {
   final Widget child;
 
   const AppSidebarContainer({super.key, required this.child});
 
-  static const _extendedMinViewWidth = 720.0;
+  @override
+  ConsumerState<AppSidebarContainer> createState() =>
+      _AppSidebarContainerState();
+}
 
-  void _updateSideBarWidth(WidgetRef ref, double contentWidth) {
+class _AppSidebarContainerState extends ConsumerState<AppSidebarContainer> {
+  static const _extendedMinViewWidth = 720.0;
+  static const _railWidth = 76.0;
+  static const _minWidth = 168.0;
+  static const _maxWidth = 320.0;
+
+  double _width = 220;
+  bool _collapsed = false;
+  bool _dragging = false;
+  double _dragWidth = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    preferences.getSidebarWidth().then((value) {
+      if (!mounted || value == null) {
+        return;
+      }
+      setState(() {
+        _collapsed = value <= 0;
+        if (!_collapsed) {
+          _width = value.clamp(_minWidth, _maxWidth);
+        }
+      });
+    });
+  }
+
+  void _saveWidth() {
+    preferences.setSidebarWidth(_collapsed ? 0 : _width);
+  }
+
+  void _toggleCollapsed() {
+    setState(() => _collapsed = !_collapsed);
+    _saveWidth();
+  }
+
+  void _onDragStart() {
+    _dragWidth = _collapsed ? _railWidth : _width;
+    setState(() => _dragging = true);
+  }
+
+  void _onDragUpdate(double dx) {
+    _dragWidth += dx;
+    setState(() {
+      // Past the midpoint between rail and minimum the sidebar snaps shut.
+      _collapsed = _dragWidth < (_railWidth + _minWidth) / 2;
+      if (!_collapsed) {
+        _width = _dragWidth.clamp(_minWidth, _maxWidth);
+      }
+    });
+  }
+
+  void _onDragEnd() {
+    if (!_dragging) {
+      return;
+    }
+    setState(() => _dragging = false);
+    _saveWidth();
+  }
+
+  void _updateSideBarWidth(double contentWidth) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
       ref.read(sideWidthProvider.notifier).value =
           ref.read(viewSizeProvider.select((state) => state.width)) -
           contentWidth;
     });
   }
 
-  void _handleToPage(WidgetRef ref, PageLabel pageLabel) {
+  void _handleToPage(PageLabel pageLabel) {
     final focusNode = FocusManager.instance.primaryFocus;
     final preserveNavigationFocus =
         focusNode?.context?.findAncestorWidgetOfExactType<SidebarNav>() != null;
@@ -415,48 +533,110 @@ class AppSidebarContainer extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final navigationState = ref.watch(navigationStateProvider);
     final navigationItems = navigationState.navigationItems;
     final isMobileView = navigationState.viewMode == ViewMode.mobile;
     final currentIndex = navigationState.currentIndex;
-    final extended =
+    final canExtend =
         ref.watch(viewSizeProvider.select((state) => state.width)) >=
         _extendedMinViewWidth;
+    final extended = canExtend && !_collapsed;
+    // On Windows and Linux the brand rides in the transparent title bar,
+    // level with the caption buttons, instead of pushing the list down.
+    final brandInHeader = system.isDesktop && !system.isMacOS;
     // The desktop root paints the aurora; sidebar and title bar sit straight
     // on it so they read as one frosted strip around the content sheet.
     return Row(
       children: [
         AnimatedVisibility.sidebar(
           visible: !isMobileView,
-          child: SizedBox(
-            width: extended ? 220 : 76,
+          child: AnimatedContainer(
+            duration: _dragging
+                ? Duration.zero
+                : const Duration(milliseconds: 200),
+            curve: Curves.easeOutCubic,
+            width: extended ? _width : _railWidth,
             child: Material(
               type: MaterialType.transparency,
               child: SafeArea(
                 right: false,
-                child: Column(
+                child: Stack(
                   children: [
-                    if (system.isMacOS) const SizedBox(height: 22),
-                    const SizedBox(height: 10),
-                    if (!system.isMacOS) ...[
-                      _SidebarBrand(extended: extended),
-                      const SizedBox(height: 18),
-                    ],
-                    Expanded(
-                      child: ScrollConfiguration(
-                        behavior: const HiddenBarScrollBehavior(),
-                        child: SidebarNav(
-                          items: navigationItems,
-                          selectedIndex: currentIndex,
-                          extended: extended,
-                          onSelected: (index) {
-                            _handleToPage(ref, navigationItems[index].label);
-                          },
+                    Column(
+                      children: [
+                        if (system.isMacOS) const SizedBox(height: 22),
+                        if (brandInHeader)
+                          SizedBox(
+                            width: double.infinity,
+                            height: 0,
+                            child: OverflowBox(
+                              minHeight: kHeaderHeight,
+                              maxHeight: kHeaderHeight,
+                              alignment: Alignment.bottomCenter,
+                              child: _SidebarBrand(extended: extended),
+                            ),
+                          ),
+                        if (!system.isMacOS && !brandInHeader) ...[
+                          const SizedBox(height: 10),
+                          SizedBox(
+                            height: 30,
+                            child: _SidebarBrand(extended: extended),
+                          ),
+                        ],
+                        const SizedBox(height: 10),
+                        Expanded(
+                          child: ScrollConfiguration(
+                            behavior: const HiddenBarScrollBehavior(),
+                            child: SidebarNav(
+                              items: navigationItems,
+                              selectedIndex: currentIndex,
+                              extended: extended,
+                              onSelected: (index) {
+                                _handleToPage(navigationItems[index].label);
+                              },
+                            ),
+                          ),
+                        ),
+                        if (canExtend)
+                          Padding(
+                            padding: EdgeInsetsDirectional.only(
+                              start: extended ? 14 : 0,
+                              top: 6,
+                              bottom: 10,
+                            ),
+                            child: Align(
+                              alignment: extended
+                                  ? AlignmentDirectional.centerStart
+                                  : Alignment.center,
+                              child: IconButton(
+                                tooltip: context.appLocalizations.toggleLabel,
+                                onPressed: _toggleCollapsed,
+                                icon: Icon(
+                                  extended ? Icons.menu_open : Icons.menu,
+                                  size: 20,
+                                  color: context.colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ),
+                          )
+                        else
+                          const SizedBox(height: 12),
+                      ],
+                    ),
+                    if (canExtend)
+                      PositionedDirectional(
+                        top: 0,
+                        bottom: 0,
+                        end: 0,
+                        width: 8,
+                        child: _SidebarResizeHandle(
+                          active: _dragging,
+                          onStart: _onDragStart,
+                          onUpdate: _onDragUpdate,
+                          onEnd: _onDragEnd,
                         ),
                       ),
-                    ),
-                    const SizedBox(height: 12),
                   ],
                 ),
               ),
@@ -467,12 +647,15 @@ class AppSidebarContainer extends ConsumerWidget {
           flex: 1,
           child: LayoutBuilder(
             builder: (_, constraints) {
-              _updateSideBarWidth(ref, constraints.maxWidth);
+              _updateSideBarWidth(constraints.maxWidth);
               return Padding(
                 padding: isMobileView
                     ? EdgeInsets.zero
                     : const EdgeInsets.fromLTRB(0, 0, 8, 8),
-                child: _ContentSheet(framed: !isMobileView, child: child),
+                child: _ContentSheet(
+                  framed: !isMobileView,
+                  child: widget.child,
+                ),
               );
             },
           ),

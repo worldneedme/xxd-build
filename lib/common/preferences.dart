@@ -151,6 +151,16 @@ class Preferences {
     await sharedPreferencesIns?.setString(bootRecordKey, json.encode(record));
   }
 
+  Future<double?> getSidebarWidth() async {
+    final sharedPreferencesIns = await sharedPreferencesCompleter.future;
+    return sharedPreferencesIns?.getDouble('sidebarWidth');
+  }
+
+  Future<void> setSidebarWidth(double width) async {
+    final sharedPreferencesIns = await sharedPreferencesCompleter.future;
+    await sharedPreferencesIns?.setDouble('sidebarWidth', width);
+  }
+
   Future<void> clearPreferences() async {
     final sharedPreferencesIns = await sharedPreferencesCompleter.future;
     await sharedPreferencesIns?.clear();

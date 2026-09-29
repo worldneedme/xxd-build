@@ -79,6 +79,71 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('desktop sidebar collapses by button and by dragging its edge', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final container = ProviderContainer(
+      overrides: [
+        navigationItemsStateProvider.overrideWithValue(
+          NavigationItemsState(
+            value: [
+              NavigationItem(
+                icon: const Icon(Icons.space_dashboard),
+                label: PageLabel.dashboard,
+                builder: (_) => const SizedBox.shrink(),
+              ),
+              NavigationItem(
+                icon: const Icon(Icons.construction),
+                label: PageLabel.tools,
+                builder: (_) => const SizedBox.shrink(),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+    globalState.container = container;
+    container.read(viewSizeProvider.notifier).value = const Size(1200, 800);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const TestApp(includeNavigatorKey: false, child: HomePage()),
+      ),
+    );
+    await tester.pump();
+
+    bool extended() =>
+        tester.widget<SidebarNav>(find.byType(SidebarNav)).extended;
+    final resizeHandle = find.byWidgetPredicate(
+      (widget) =>
+          widget is MouseRegion &&
+          widget.cursor == SystemMouseCursors.resizeColumn,
+    );
+
+    expect(extended(), isTrue);
+    await tester.tap(find.byIcon(Icons.menu_open));
+    await tester.pumpAndSettle();
+    expect(extended(), isFalse);
+    await tester.tap(find.byIcon(Icons.menu));
+    await tester.pumpAndSettle();
+    expect(extended(), isTrue);
+
+    await tester.drag(resizeHandle, const Offset(-200, 0));
+    await tester.pumpAndSettle();
+    expect(extended(), isFalse);
+    await tester.drag(resizeHandle, const Offset(200, 0));
+    await tester.pumpAndSettle();
+    expect(extended(), isTrue);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets(
     'screen-size transition preserves current content and animates navigation',
     (tester) async {
