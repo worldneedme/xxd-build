@@ -121,20 +121,13 @@ void main() {
       );
       await tester.pump();
 
-      final sidebarBackground = find.descendant(
-        of: find.byType(AppSidebarContainer),
-        matching: find.byWidgetPredicate(
-          (widget) => widget is Container && widget.child is Row,
-        ),
-      );
-      final sidebarContainer = tester.widget<Container>(
-        sidebarBackground.first,
-      );
+      // The rail background comes from the glass panel, not a flat container.
       expect(
-        sidebarContainer.color,
-        Theme.of(
-          tester.element(find.byType(AppSidebarContainer)),
-        ).colorScheme.surfaceContainer,
+        find.descendant(
+          of: find.byType(AppSidebarContainer),
+          matching: find.byType(GlassPanel),
+        ),
+        findsOneWidget,
       );
 
       await tester.tap(find.text('count: 0'));
