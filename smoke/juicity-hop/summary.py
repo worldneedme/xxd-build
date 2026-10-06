@@ -19,7 +19,7 @@ for row in rows:
     if row['mode'] == 'baseline':
         assert ports == [10444], f'baseline used unexpected destination ports {ports}'
     else:
-        assert ports and all(20000 <= p <= 20020 for p in ports), f'ports outside isolated range: {ports}'
+        assert ports and all(31000 <= p <= 31020 for p in ports), f'ports outside isolated range: {ports}'
         assert any(len(set(seq)) >= 4 and sum(a != b for a,b in zip(seq, seq[1:])) >= 3 for seq in flows.values()), 'fewer than three changes on one UDP socket'
         assert row['tcp_bytes'] == 80 * 16384 and row['udp_echo_ok'] == 40
     row['destination_ports'] = ports

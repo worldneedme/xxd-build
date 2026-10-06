@@ -45,7 +45,7 @@ jobs:
           set -euo pipefail
           test -n "$HKDEV_UUID"
           test -n "$HKDEV_PASSWORD"
-          sudo tcpdump -i any -Q out -nn -tt -l 'udp and dst host 69.33.211.38 and (dst port 10444 or dst portrange 20000-20020)' > ports.log 2> capture-status.log &
+          sudo tcpdump -i any -Q out -nn -tt -l 'udp and dst host 69.33.211.38 and (dst port 10444 or dst portrange 31000-31020)' > ports.log 2> capture-status.log &
           CAPTURE_PID=$!
           trap 'sudo kill -INT "$CAPTURE_PID" 2>/dev/null || true' EXIT
           sleep 1

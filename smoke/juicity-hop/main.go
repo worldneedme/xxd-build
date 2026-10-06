@@ -31,7 +31,7 @@ func run() error {
         Name: "isolated-hk-dev-smoke", Server: "69.33.211.38", Port: 10444,
         UUID: os.Getenv("HKDEV_UUID"), Password: os.Getenv("HKDEV_PASSWORD"),
         SNI: "hkdev01.020021.qzz.io", UDP: true,
-        Hop: hop, HopPorts: "20000-20020", HopInterval: 5,
+        Hop: hop, HopPorts: "31000-31020", HopInterval: 5,
     })
     if err != nil { return err }
     ctx, cancel := context.WithTimeout(context.Background(), 80*time.Second)
