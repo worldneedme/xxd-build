@@ -1,0 +1,58 @@
+name: Build isolated Juicity RS hopping fix
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  server:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: worldneedme/dangerx
+          ref: be4c7bfd43f1a2b02b201dbff9dd9818956991ce
+          ssh-key: ${{ secrets.DANGERX_READ_KEY }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: protocols/juicity/core-rs
+          cache-on-failure: true
+      - name: Format and test private server source
+        run: |
+          set -euo pipefail
+          rustfmt --edition 2021 --check protocols/juicity/core-rs/server/src/server.rs > format.log 2>&1 || { echo 'Private server formatting check failed'; exit 1; }
+          cargo test --locked --manifest-path protocols/juicity/core-rs/Cargo.toml -p juicity-server --lib > test.log 2>&1 || { echo 'Private server unit tests failed'; grep -E '^test .*FAILED|^test result:|^error:' test.log || true; exit 1; }
+          grep '^test result:' test.log
+      - name: Build Linux amd64 server only
+        run: |
+          set -euo pipefail
+          cargo build --release --locked --manifest-path protocols/juicity/core-rs/Cargo.toml -p juicity-server --message-format=json > build.jsonl 2> build-status.log || {
+            python3 - <<'PY'
+          import json
+          for line in open('build.jsonl'):
+              try:
+                  data = json.loads(line)
+              except ValueError:
+                  continue
+              if data.get('reason') == 'compiler-message' and data['message']['level'] == 'error':
+                  print('compiler error:', data['message']['message'])
+          PY
+            echo 'Private server build failed'
+            exit 1
+          }
+          mkdir -p dist
+          cp protocols/juicity/core-rs/target/release/juicity-server dist/juicity-server-rs
+          (cd dist && sha256sum juicity-server-rs > SHA256SUMS)
+          printf '%s\n' "$GITHUB_SHA" > dist/workflow-commit.txt
+          printf '%s\n' 'be4c7bfd43f1a2b02b201dbff9dd9818956991ce' > dist/source-commit.txt
+          dist/juicity-server-rs --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: isolated-juicity-rs-hop-server
+          path: dist/
+          retention-days: 7
