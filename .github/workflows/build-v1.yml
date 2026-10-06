@@ -462,7 +462,9 @@ jobs:
             $buffer = New-Object byte[] $Count
             $offset = 0
             while ($offset -lt $Count) {
-              $read = $Stream.Read($buffer, $offset, $Count - $offset)
+              $readTask = $Stream.ReadAsync($buffer, $offset, $Count - $offset)
+              if (-not $readTask.Wait(10000)) { throw 'Timed out waiting for an installed Core RPC frame.' }
+              $read = [int]$readTask.Result
               if ($read -le 0) { throw 'Core RPC pipe closed before a complete frame arrived.' }
               $offset += $read
             }
@@ -487,7 +489,6 @@ jobs:
               65536,
               65536
             )
-            $probeServer.ReadTimeout = 10000
             $connection = $probeServer.WaitForConnectionAsync()
             $probeCore = Start-Process -FilePath (Join-Path $installRoot 'FlClashCore.exe') `
               -ArgumentList @($probePipeAddress) -WorkingDirectory $installRoot -WindowStyle Hidden -PassThru `
