@@ -5,7 +5,7 @@ import re
 rows = [json.loads(line) for line in Path('results.jsonl').read_text().splitlines() if line.startswith('{"')]
 packets = []
 for line in Path('ports.log').read_text().splitlines():
-    m = re.match(r'(\d+\.\d+) IP [\d.]+\.(\d+) > 69\.33\.211\.38\.(\d+):', line)
+    m = re.match(r'(\d+\.\d+).*?\bIP [\d.]+\.(\d+) > 69\.33\.211\.38\.(\d+):', line)
     if m:
         packets.append((float(m[1]), int(m[2]), int(m[3])))
 assert len(rows) == 4, f'expected baseline and three hop rounds, got {len(rows)}'

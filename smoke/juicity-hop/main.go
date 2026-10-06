@@ -4,6 +4,7 @@ import (
     "bytes"
     "context"
     "encoding/json"
+    "errors"
     "fmt"
     "io"
     "net"
@@ -83,10 +84,12 @@ func run() error {
     }()
     wg.Wait()
     close(errs)
-    for err := range errs { if err != nil { return err } }
-    return json.NewEncoder(os.Stdout).Encode(map[string]any{
+    var failures []error
+    for err := range errs { if err != nil { failures = append(failures, err) } }
+    if err := json.NewEncoder(os.Stdout).Encode(map[string]any{
         "mode": os.Getenv("SMOKE_MODE"), "round": os.Getenv("SMOKE_ROUND"),
         "start": start, "end": float64(time.Now().UnixNano()) / 1e9,
         "tcp_bytes": tcpBytes, "udp_echo_ok": udpOK, "udp_max_rtt_ms": maxRTT.Milliseconds(),
-    })
+    }); err != nil { return err }
+    return errors.Join(failures...)
 }
