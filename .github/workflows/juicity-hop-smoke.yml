@@ -1,0 +1,79 @@
+name: Isolated HK Juicity hop smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: isolated-hk-juicity-hop-smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: runner
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: worldneedme/xxdmanfl0609
+          ref: 0bee5070c7cacaa1ddd17df75ea48cc896e6ddef
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.4'
+          cache-dependency-path: source/core/Clash.Meta/go.sum
+      - name: Compile actual custom outbound and run hopping unit tests
+        working-directory: source/core/Clash.Meta
+        run: |
+          mkdir -p cmd/juicity-hop-smoke
+          cp "$GITHUB_WORKSPACE/runner/smoke/juicity-hop/main.go" cmd/juicity-hop-smoke/main.go
+          go test ./adapter/outbound -run 'TestJuicity(Hop|Hopper|Underlay)' -count=1 -timeout=3m
+          go build -o "$GITHUB_WORKSPACE/hop-smoke" ./cmd/juicity-hop-smoke
+      - name: Baseline and three long lived TCP/UDP hopping rounds
+        env:
+          HKDEV_UUID: ${{ secrets.HKDEV_UUID }}
+          HKDEV_PASSWORD: ${{ secrets.HKDEV_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$HKDEV_UUID"
+          test -n "$HKDEV_PASSWORD"
+          sudo tcpdump -i any -Q out -nn -tt -l 'udp and dst host 69.33.211.38 and (dst port 10444 or dst portrange 20000-20020)' > ports.log 2> capture-status.log &
+          CAPTURE_PID=$!
+          trap 'sudo kill -INT "$CAPTURE_PID" 2>/dev/null || true' EXIT
+          sleep 1
+          SMOKE_MODE=baseline SMOKE_ROUND=0 timeout 90s ./hop-smoke | tee results.jsonl
+          for ROUND in 1 2 3; do
+            SMOKE_MODE=hop SMOKE_ROUND="$ROUND" timeout 90s ./hop-smoke | tee -a results.jsonl
+          done
+          sudo kill -INT "$CAPTURE_PID"
+          wait "$CAPTURE_PID" || true
+          trap - EXIT
+          python3 runner/smoke/juicity-hop/summary.py
+          python3 - <<'PY'
+          import json, os
+          rows = json.load(open('summary.json'))
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as out:
+              out.write('|Mode|Round|TCP bytes verified|UDP echoes|Distinct destination ports|\n|---|---|---|---|---|\n')
+              for r in rows:
+                  out.write(f"|{r['mode']}|{r['round']}|{r['tcp_bytes']}|{r['udp_echo_ok']}|{r['max_distinct_ports_per_socket']}|\n")
+          PY
+      - name: Retain only test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: isolated-hk-hop-evidence
+          path: |
+            summary.json
+            results.jsonl
+            ports.log
+            capture-status.log
+          retention-days: 7
+          if-no-files-found: ignore
