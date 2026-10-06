@@ -4,11 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       source_ref:
-        description: Private V1 commit SHA, branch or tag to build
+        description: Full commit SHA from the private V1 client repository
         required: true
         type: string
       release_tag:
-        description: Public xxd-build Release tag
+        description: Unique xxd-build prerelease tag; repository stays private
         required: true
         type: string
       platform:
@@ -16,15 +16,32 @@ on:
         required: true
         default: all
         type: string
+      panel_source_sha:
+        description: Exact panel commit used for development validation
+        required: true
+        type: string
+      dangerx_validated_source_sha:
+        description: Exact DangerX commit validated for this delivery
+        required: true
+        type: string
+      dangerx_validated_binary_sha256:
+        description: SHA256 of the validated development DangerX binary
+        required: true
+        type: string
+      development_validation_run_url:
+        description: Successful real-subscription development smoke URL; leave empty to build artifacts without publishing
+        required: false
+        type: string
 
 permissions:
-  contents: write
+  contents: read
 
 env:
-  IS_TAG: 'true'
   FLUTTER_VERSION: '3.47.1'
   GO_VERSION: '1.26.4'
   NDK_VERSION: r28c
+  NAIVE_VERSION: 'v154.0.8037.49-3'
+  NAIVE_APK_SHA256: 'c65ecdd032a05d85884eed03e231b23c6feff6b59b1e7de7aa1591ba7d692f0a'
 
 jobs:
   test:
@@ -32,6 +49,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
+      source_sha: ${{ steps.source.outputs.sha }}
     steps:
       - name: Plan requested platforms
         id: plan
@@ -55,6 +73,41 @@ jobs:
           ref: ${{ inputs.source_ref }}
           ssh-key: ${{ secrets.SOURCE_READ_KEY }}
           persist-credentials: false
+
+      - name: Validate immutable source and release metadata
+        id: source
+        shell: bash
+        env:
+          SOURCE_REF: ${{ inputs.source_ref }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          PANEL_SHA: ${{ inputs.panel_source_sha }}
+          DANGERX_SHA: ${{ inputs.dangerx_validated_source_sha }}
+          DANGERX_BINARY_SHA256: ${{ inputs.dangerx_validated_binary_sha256 }}
+          DEVELOPMENT_VALIDATION_URL: ${{ inputs.development_validation_run_url }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sha_pattern='^[0-9a-f]{40}$'
+          [[ "$SOURCE_REF" =~ $sha_pattern ]] || { echo 'source_ref must be a full commit SHA' >&2; exit 1; }
+          [[ "$PANEL_SHA" =~ $sha_pattern ]] || { echo 'panel_source_sha must be a full commit SHA' >&2; exit 1; }
+          [[ "$DANGERX_SHA" =~ $sha_pattern ]] || { echo 'dangerx_validated_source_sha must be a full commit SHA' >&2; exit 1; }
+          [[ "$DANGERX_BINARY_SHA256" =~ ^[0-9a-f]{64}$ ]] || { echo 'dangerx_validated_binary_sha256 must be a SHA256 hex digest' >&2; exit 1; }
+          [[ "$(git rev-parse HEAD)" == "$SOURCE_REF" ]] || { echo 'checked out client SHA does not match source_ref' >&2; exit 1; }
+          [[ "$RELEASE_TAG" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || { echo 'invalid release_tag' >&2; exit 1; }
+          if [[ -n "$DEVELOPMENT_VALIDATION_URL" ]]; then
+            [[ "$DEVELOPMENT_VALIDATION_URL" =~ ^https://github\.com/worldneedme/xxd-build/actions/runs/[0-9]+/?$ ]] || {
+              echo 'development_validation_run_url must be an xxd-build Actions run URL' >&2; exit 1;
+            }
+          fi
+          status=$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/worldneedme/xxd-build/releases/tags/$RELEASE_TAG")
+          [[ "$status" == 404 ]] || { echo "release tag already exists or tag lookup failed (HTTP $status)" >&2; exit 1; }
+          tag_status=$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/worldneedme/xxd-build/git/ref/tags/$RELEASE_TAG")
+          [[ "$tag_status" == 404 ]] || { echo "git tag already exists or tag lookup failed (HTTP $tag_status)" >&2; exit 1; }
+          echo "sha=$SOURCE_REF" >> "$GITHUB_OUTPUT"
 
       - name: Test release notes generation
         shell: bash
@@ -112,7 +165,7 @@ jobs:
         working-directory: core/Clash.Meta
         run: |
           go test ./adapter ./config ./adapter/outbound \
-            -run 'TestParseHelperBackedProtocols|TestParseHelperBackedProtocolConfig|TestNaiveProxyPasswordOnlyAndStablePort|TestJuicityNativeConstruction|TestJuicityNativeUsesFirstHopPort' \
+            -run 'TestParseHelperBackedProtocols|TestParseHelperBackedProtocolConfig|TestNaiveProxyPasswordOnlyAndStablePort|TestJuicityNativeConstruction|TestJuicityNativeUsesFirstHopPort|TestJuicity(Hop|Hopper|Underlay)' \
             -count=1 -timeout=120s
 
       - name: Validate Rust components
@@ -146,6 +199,13 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       IS_STABLE: ${{ !contains(inputs.release_tag, '-') }}
+      CLIENT_SOURCE_SHA: ${{ inputs.source_ref }}
+      PANEL_SOURCE_SHA: ${{ inputs.panel_source_sha }}
+      DANGERX_VALIDATED_SOURCE_SHA: ${{ inputs.dangerx_validated_source_sha }}
+      DANGERX_VALIDATED_BINARY_SHA256: ${{ inputs.dangerx_validated_binary_sha256 }}
+      DEVELOPMENT_VALIDATION_RUN_URL: ${{ inputs.development_validation_run_url }}
+      BUILD_WORKFLOW_SHA: ${{ github.sha }}
+      BUILD_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.test.outputs.matrix) }}
@@ -159,6 +219,12 @@ jobs:
           ssh-key: ${{ secrets.SOURCE_READ_KEY }}
           persist-credentials: false
 
+      - name: Verify immutable source checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CLIENT_SOURCE_SHA"
+
       - name: Free disk space
         if: matrix.platform == 'android'
         run: |
@@ -169,17 +235,35 @@ jobs:
       - name: Setup Android signing
         if: matrix.platform == 'android'
         shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          SERVICE_JSON_BASE64: ${{ secrets.SERVICE_JSON }}
         run: |
-          if [ -n "${{ secrets.KEYSTORE }}" ]; then
-            echo "${{ secrets.KEYSTORE }}" | base64 --decode > android/app/keystore.jks
+          set -euo pipefail
+          signing_values=("${KEYSTORE_BASE64:-}" "${KEY_ALIAS:-}" "${STORE_PASSWORD:-}" "${KEY_PASSWORD:-}")
+          signing_count=0
+          for value in "${signing_values[@]}"; do
+            if [[ -n "$value" ]]; then
+              signing_count=$((signing_count + 1))
+            fi
+          done
+          if (( signing_count != 0 && signing_count != 4 )); then
+            echo 'Android signing secrets are incomplete; refusing a partially configured signing build.' >&2
+            exit 1
+          fi
+          if [ -n "${KEYSTORE_BASE64:-}" ]; then
+            printf '%s' "$KEYSTORE_BASE64" | base64 --decode > android/app/keystore.jks
             {
-              echo "keyAlias=${{ secrets.KEY_ALIAS }}"
-              echo "storePassword=${{ secrets.STORE_PASSWORD }}"
-              echo "keyPassword=${{ secrets.KEY_PASSWORD }}"
+              printf 'keyAlias=%s\n' "$KEY_ALIAS"
+              printf 'storePassword=%s\n' "$STORE_PASSWORD"
+              printf 'keyPassword=%s\n' "$KEY_PASSWORD"
             } >> android/local.properties
           fi
-          if [ -n "${{ secrets.SERVICE_JSON }}" ]; then
-            echo "${{ secrets.SERVICE_JSON }}" | base64 --decode > android/app/google-services.json
+          if [ -n "${SERVICE_JSON_BASE64:-}" ]; then
+            printf '%s' "$SERVICE_JSON_BASE64" | base64 --decode > android/app/google-services.json
           fi
 
       - name: Setup Go
@@ -219,12 +303,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          retry="--retry 4 --retry-delay 6 --retry-all-errors"
-          version=$(curl -fsSL $retry -H "Authorization: Bearer ${{ github.token }}" https://api.github.com/repos/klzgrad/naiveproxy/releases/latest | sed -nE 's/.*"tag_name": "([^"]+)".*/\1/p' | head -1)
-          test -n "$version"
+          retry=(--retry 4 --retry-delay 6 --retry-all-errors)
+          version='${{ env.NAIVE_VERSION }}'
+          expected='${{ env.NAIVE_APK_SHA256 }}'
           apk="naiveproxy-plugin-${version}-arm64-v8a.apk"
+          release_json=$(curl -fsSL "${retry[@]}" \
+            "https://api.github.com/repos/klzgrad/naiveproxy/releases/tags/$version")
+          release_digest=$(python3 -c 'import json, sys; release=json.load(sys.stdin); assets=[asset for asset in release.get("assets", []) if asset.get("name") == sys.argv[1]]; print(assets[0].get("digest", "") if len(assets) == 1 else "")' \
+            "$apk" <<< "$release_json")
+          test "$release_digest" = "sha256:$expected"
           mkdir -p naive_tmp android/app/src/main/jniLibs/arm64-v8a
-          curl -fL $retry -o "naive_tmp/$apk" "https://github.com/klzgrad/naiveproxy/releases/download/${version}/${apk}"
+          curl -fL "${retry[@]}" -o "naive_tmp/$apk" "https://github.com/klzgrad/naiveproxy/releases/download/${version}/${apk}"
+          actual=$(sha256sum "naive_tmp/$apk" | cut -d' ' -f1)
+          test "$actual" = "$expected"
           unzip -o "naive_tmp/$apk" 'lib/arm64-v8a/libnaive.so' -d naive_tmp/extracted
           cp naive_tmp/extracted/lib/arm64-v8a/libnaive.so android/app/src/main/jniLibs/arm64-v8a/
           test -s android/app/src/main/jniLibs/arm64-v8a/libnaive.so
@@ -241,7 +332,27 @@ jobs:
 
       - name: Verify Android native core bridge
         if: matrix.platform == 'android'
-        run: python3 .github/scripts/check_android_apk_native_core.py ./dist --abi ${{ matrix.arch }}
+        id: android-check
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f android/app/keystore.jks ]]; then
+            expected_app_id='com.follow.clash'
+            signing_mode='release-keystore'
+          else
+            expected_app_id='com.follow.clash.dev'
+            signing_mode='debug-key-non-overwrite-test-package'
+          fi
+          python3 .github/scripts/check_android_apk_native_core.py ./dist \
+            --abi '${{ matrix.arch }}' --expected-app-id "$expected_app_id"
+          apksigner=$(find "$ANDROID_HOME/build-tools" -maxdepth 2 -type f -name apksigner -print | sort -V | tail -1)
+          test -n "$apksigner"
+          : > ./dist/APK-SIGNATURES.txt
+          while IFS= read -r apk; do
+            "$apksigner" verify --verbose --print-certs "$apk" >> ./dist/APK-SIGNATURES.txt
+          done < <(find ./dist -type f -name '*.apk' -print | sort)
+          test -s ./dist/APK-SIGNATURES.txt
+          echo "signing_mode=$signing_mode" >> "$GITHUB_OUTPUT"
 
       - name: Verify package outputs
         shell: bash
@@ -255,6 +366,8 @@ jobs:
             archive=$(find ./dist -name '*-windows-*.zip' -print -quit)
             test -n "$setup"
             test -n "$archive"
+            test -s "$setup"
+            test -s "$archive"
             python .github/scripts/check_windows_package.py "$archive"
           fi
 
@@ -263,26 +376,178 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          $setup = Get-ChildItem -Path '.\dist' -Recurse -Filter '*-windows-*-setup.exe' | Select-Object -First 1
           $zip = Get-ChildItem -Path '.\dist' -Recurse -Filter '*-windows-*.zip' | Select-Object -First 1
-          if (-not $zip) { throw 'Windows ZIP was not produced.' }
-          $root = Join-Path (Get-Location).Path 'smoke'
-          Expand-Archive -LiteralPath $zip.FullName -DestinationPath $root -Force
-          $exe = Join-Path $root 'FlClash.exe'
-          foreach ($required in @('FlClash.exe', 'FlClashCore.exe', 'manifest.json', 'protocol-helpers\naive.exe')) {
-            if (-not (Test-Path (Join-Path $root $required))) { throw "$required is missing" }
+          if (-not $setup -or $setup.Length -le 0) { throw 'A non-empty Windows installer was not produced.' }
+          if (-not $zip -or $zip.Length -le 0) { throw 'A non-empty Windows ZIP was not produced.' }
+
+          $installRoot = Join-Path $env:RUNNER_TEMP 'wonderx-juicity-hop-install'
+          $stdout = Join-Path $env:RUNNER_TEMP 'wonderx-juicity-hop-app.stdout.log'
+          $stderr = Join-Path $env:RUNNER_TEMP 'wonderx-juicity-hop-app.stderr.log'
+          if (-not $installRoot.StartsWith($env:RUNNER_TEMP, [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Refusing to install outside the isolated runner temp directory.'
           }
-          if (Test-Path (Join-Path $root 'protocol-helpers\juicity-client.exe')) {
-            throw 'Juicity must be native and must not ship as a helper executable.'
+          if (Test-Path -LiteralPath $installRoot) { throw 'The isolated install path already exists.' }
+
+          $applicationNames = @('FlClash.exe', 'FlClashCore.exe', 'FlClashHelperService.exe')
+          $preexisting = @(Get-CimInstance Win32_Process | Where-Object { $applicationNames -contains $_.Name })
+          if ($preexisting.Count -gt 0) {
+            throw 'A same-named FlClash process already exists on the runner; refusing an installer whose hook terminates by image name.'
           }
-          $process = Start-Process -FilePath $exe -WorkingDirectory $root -WindowStyle Hidden -PassThru
-          Start-Sleep -Seconds 12
-          $process.Refresh()
-          if ($process.HasExited -and $process.ExitCode -ne 0) {
-            throw "FlClash.exe exited during smoke with code $($process.ExitCode)"
+
+          $install = Start-Process -FilePath $setup.FullName -Wait -PassThru -WindowStyle Hidden -ArgumentList @(
+            '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', "/DIR=$installRoot"
+          )
+          if ($install.ExitCode -ne 0) { throw "Inno Setup installer failed with exit code $($install.ExitCode)." }
+
+          $requiredFiles = @(
+            'FlClash.exe', 'FlClashCore.exe', 'FlClashHelperService.exe', 'manifest.json', 'unins000.exe',
+            'flutter_windows.dll', 'data\icudtl.dat', 'protocol-helpers\naive.exe'
+          )
+          foreach ($relative in $requiredFiles) {
+            if (-not (Test-Path -LiteralPath (Join-Path $installRoot $relative) -PathType Leaf)) {
+              throw "Installed application is missing $relative"
+            }
           }
-          Get-Process -Name FlClash,FlClashCore -ErrorAction SilentlyContinue |
-            Where-Object { $_.Path -and $_.Path.StartsWith($root, [StringComparison]::OrdinalIgnoreCase) } |
-            Stop-Process -Force -ErrorAction SilentlyContinue
+          if (-not (Test-Path -LiteralPath (Join-Path $installRoot 'data\flutter_assets') -PathType Container)) {
+            throw 'Installed application is missing data/flutter_assets.'
+          }
+          if (Get-ChildItem -LiteralPath $installRoot -Recurse -Filter 'juicity-client.exe' -ErrorAction SilentlyContinue) {
+            throw 'Juicity is native in FlClashCore and must not ship as a helper executable.'
+          }
+
+          $exe = Join-Path $installRoot 'FlClash.exe'
+          $versionInfo = [Diagnostics.FileVersionInfo]::GetVersionInfo($exe)
+          if ($versionInfo.CompanyName -ne 'com.follow' -or $versionInfo.ProductName -ne 'WONDERX V1') {
+            throw 'The installed executable has unexpected Windows application-data identity metadata.'
+          }
+          $appSupportDirectory = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::ApplicationData)) 'com.follow\WONDERX V1'
+          if (Test-Path -LiteralPath $appSupportDirectory) {
+            throw 'The isolated runner already has an application support directory; refusing to overwrite its preferences.'
+          }
+          New-Item -ItemType Directory -Path $appSupportDirectory | Out-Null
+          $preferences = @{ 'flutter.config' = '{"appSettingProps":{"disclaimerAccepted":true},"themeProps":{}}' }
+          $preferences | ConvertTo-Json -Compress | Set-Content -LiteralPath (Join-Path $appSupportDirectory 'shared_preferences.json') -NoNewline -Encoding utf8
+          Set-Content -LiteralPath (Join-Path $appSupportDirectory '.ci-smoke-owner') -Value $env:GITHUB_RUN_ID -NoNewline -Encoding ascii
+          $app = Start-Process -FilePath $exe -WorkingDirectory $installRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          $appPid = $app.Id
+          $corePid = $null
+          $pipeName = $null
+          $deadline = (Get-Date).AddSeconds(30)
+          while ((Get-Date) -lt $deadline) {
+            $owned = @(Get-CimInstance Win32_Process | Where-Object {
+              $_.ExecutablePath -and $_.ExecutablePath.StartsWith($installRoot, [StringComparison]::OrdinalIgnoreCase)
+            })
+            $appProcess = $owned | Where-Object { [IO.Path]::GetFileName($_.ExecutablePath) -ieq 'FlClash.exe' } | Select-Object -First 1
+            $coreProcess = $owned | Where-Object { [IO.Path]::GetFileName($_.ExecutablePath) -ieq 'FlClashCore.exe' } | Select-Object -First 1
+            $pipes = @([IO.Directory]::GetFiles('\\.\pipe\') | Where-Object { [IO.Path]::GetFileName($_) -like 'FlClashCore_*' })
+            if ($appProcess -and $coreProcess -and $pipes.Count -gt 0) {
+              $appPid = [int]$appProcess.ProcessId
+              $corePid = [int]$coreProcess.ProcessId
+              $pipeName = [IO.Path]::GetFileName($pipes[0])
+              break
+            }
+            Start-Sleep -Seconds 1
+          }
+          if (-not $corePid -or -not $pipeName) {
+            throw 'The installed app did not keep its process and initialize FlClashCore IPC within 30 seconds.'
+          }
+
+          $pipe = [System.IO.Pipes.NamedPipeClientStream]::new('.', $pipeName, [System.IO.Pipes.PipeDirection]::InOut)
+          try {
+            $pipe.Connect(3000)
+            if (-not $pipe.IsConnected) { throw 'Core IPC pipe did not accept a client connection.' }
+            $reader = [System.IO.StreamReader]::new($pipe, [System.Text.Encoding]::ASCII, $false, 1024, $true)
+            $writer = [System.IO.StreamWriter]::new($pipe, [System.Text.Encoding]::ASCII, 1024, $true)
+            $writer.NewLine = "`r`n"
+            $writer.Write("GET /version HTTP/1.1`r`nHost: localhost`r`nConnection: close`r`n`r`n")
+            $writer.Flush()
+            $statusLine = $reader.ReadLine()
+            if ($statusLine -notmatch '^HTTP/1\.[01] 200 ') {
+              throw "Core IPC did not serve its version endpoint: $statusLine"
+            }
+            $reader.Dispose()
+            $writer.Dispose()
+          } finally {
+            $pipe.Dispose()
+          }
+
+          for ($second = 0; $second -lt 20; $second++) {
+            $appStillRunning = Get-CimInstance Win32_Process -Filter "ProcessId = $appPid" -ErrorAction SilentlyContinue
+            $coreStillRunning = Get-CimInstance Win32_Process -Filter "ProcessId = $corePid" -ErrorAction SilentlyContinue
+            if (-not $appStillRunning -or -not $coreStillRunning) {
+              throw 'The installed app or core exited during the 20-second stability window.'
+            }
+            if (-not $appStillRunning.ExecutablePath.StartsWith($installRoot, [StringComparison]::OrdinalIgnoreCase) -or
+                -not $coreStillRunning.ExecutablePath.StartsWith($installRoot, [StringComparison]::OrdinalIgnoreCase)) {
+              throw 'A process ID was reused by an executable outside the test install directory.'
+            }
+            Start-Sleep -Seconds 1
+          }
+          Write-Host 'Windows install/start smoke passed: required files, app and Core IPC remained live.'
+
+          $startupLog = @(
+            Get-Content -LiteralPath $stdout -ErrorAction SilentlyContinue
+            Get-Content -LiteralPath $stderr -ErrorAction SilentlyContinue
+          )
+          $startupLog | Select-Object -Last 40
+          $fatal = $startupLog | Select-String -Pattern 'Unhandled Exception|FATAL|panic:' -CaseSensitive:$false
+          if ($fatal) { throw 'The installed app reported a fatal startup error.' }
+
+
+      - name: Clean only the test installation and its processes
+        if: ${{ always() && matrix.platform == 'windows' }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installRoot = Join-Path $env:RUNNER_TEMP 'wonderx-juicity-hop-install'
+          if (-not $installRoot.StartsWith($env:RUNNER_TEMP, [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Refusing to clean outside the isolated runner temp directory.'
+          }
+          if (Test-Path -LiteralPath $installRoot) {
+            $owned = @(Get-CimInstance Win32_Process | Where-Object {
+              $_.ExecutablePath -and $_.ExecutablePath.StartsWith($installRoot, [StringComparison]::OrdinalIgnoreCase)
+            })
+            foreach ($process in $owned) {
+              Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
+            }
+            $appSupportDirectory = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::ApplicationData)) 'com.follow\WONDERX V1'
+            $ownerMarker = Join-Path $appSupportDirectory '.ci-smoke-owner'
+            if (Test-Path -LiteralPath $ownerMarker -PathType Leaf) {
+              $ownerRunId = (Get-Content -LiteralPath $ownerMarker -Raw).Trim()
+              if ($ownerRunId -ne $env:GITHUB_RUN_ID) {
+                throw 'The application support directory belongs to a different test run; refusing to delete it.'
+              }
+              Remove-Item -LiteralPath $appSupportDirectory -Recurse -Force
+            }
+            $applicationNames = @('FlClash.exe', 'FlClashCore.exe', 'FlClashHelperService.exe')
+            $foreign = @(Get-CimInstance Win32_Process | Where-Object {
+              ($applicationNames -contains $_.Name) -and
+              (-not $_.ExecutablePath -or -not $_.ExecutablePath.StartsWith($installRoot, [StringComparison]::OrdinalIgnoreCase))
+            })
+            if ($foreign.Count -gt 0) {
+              throw 'A same-named process outside the test installation is present; refusing the installer uninstaller hook.'
+            }
+            $uninstaller = Join-Path $installRoot 'unins000.exe'
+            if (Test-Path -LiteralPath $uninstaller -PathType Leaf) {
+              $uninstall = Start-Process -FilePath $uninstaller -Wait -PassThru -WindowStyle Hidden -ArgumentList @(
+                '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'
+              )
+              if ($uninstall.ExitCode -ne 0) { throw "Test installation cleanup failed with exit code $($uninstall.ExitCode)." }
+            }
+            if (Test-Path -LiteralPath $installRoot) { Remove-Item -LiteralPath $installRoot -Recurse -Force }
+          }
+
+      - name: Retain Windows startup logs on failure
+        if: ${{ failure() && matrix.platform == 'windows' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-startup-logs-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/wonderx-juicity-hop-app.stdout.log
+            ${{ runner.temp }}/wonderx-juicity-hop-app.stderr.log
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Generate checksums
         shell: bash
@@ -298,36 +563,88 @@ jobs:
           test -s "$out"
           cat "$out"
 
-      - name: Publish tagged packages
-        if: env.IS_TAG == 'true'
-        uses: softprops/action-gh-release@v2
-        with:
-          name: WONDERX V1 ${{ inputs.release_tag }}
-          repository: worldneedme/xxd-build
-          token: ${{ github.token }}
-          tag_name: ${{ inputs.release_tag }}
-          target_commitish: main
-          files: |
-            ./dist/**/*.apk
-            ./dist/**/*.exe
-            ./dist/**/*.zip
-            ./dist/SHA256SUMS-*.txt
-          fail_on_unmatched_files: false
+      - name: Write per-platform build manifest
+        shell: bash
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          PLATFORM_ARCH: ${{ matrix.arch }}
+          HELPER_VERSION: ${{ matrix.platform == 'android' && env.NAIVE_VERSION || 'bundled' }}
+          ANDROID_SIGNING_MODE: ${{ steps.android-check.outputs.signing_mode }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
 
-      - name: Upload manual-build artifact
-        if: env.IS_TAG != 'true'
+          dist = Path('dist')
+          packages = []
+          for path in sorted(dist.iterdir()):
+              if path.suffix.lower() not in {'.apk', '.exe', '.zip'}:
+                  continue
+              digest = hashlib.sha256()
+              with path.open('rb') as package:
+                  for block in iter(lambda: package.read(1024 * 1024), b''):
+                      digest.update(block)
+              packages.append({
+                  'filename': path.name,
+                  'size_bytes': path.stat().st_size,
+                  'sha256': digest.hexdigest(),
+              })
+          if not packages:
+              raise SystemExit('No checked package files found for manifest')
+
+          platform = os.environ['PLATFORM']
+          helper_versions = {
+              'juicity': 'native FlClashCore',
+              'naive': os.environ['HELPER_VERSION'] if platform == 'android' else 'bundled',
+          }
+          checks = ['source SHA pinned', 'shared Flutter/Dart/Go/Rust tests passed']
+          checks.append('Windows ZIP contents, installer install, app and Core IPC startup passed'
+                        if platform == 'windows'
+                        else 'Android ABI, JNI libraries, manifest packaging and signature checks passed')
+          metadata = {
+              'client_source_sha': os.environ['CLIENT_SOURCE_SHA'],
+              'panel_source_sha': os.environ['PANEL_SOURCE_SHA'],
+              'dangerx_validated_source_sha': os.environ['DANGERX_VALIDATED_SOURCE_SHA'],
+              'dangerx_validated_binary_sha256': os.environ['DANGERX_VALIDATED_BINARY_SHA256'],
+              'build_workflow_sha': os.environ['BUILD_WORKFLOW_SHA'],
+              'build_run_url': os.environ['BUILD_RUN_URL'],
+              'development_validation_run_url': os.environ['DEVELOPMENT_VALIDATION_RUN_URL'] or None,
+              'platform': platform,
+              'arch': os.environ['PLATFORM_ARCH'],
+              'toolchain_versions': {
+                  'flutter': os.environ['FLUTTER_VERSION'],
+                  'go': os.environ['GO_VERSION'],
+                  'ndk': os.environ['NDK_VERSION'] if platform == 'android' else None,
+              },
+              'helper_versions': helper_versions,
+              'android_signing_mode': os.environ['ANDROID_SIGNING_MODE'] or None,
+              'checks_completed': checks,
+              'packages': packages,
+          }
+          output = dist / f'build-metadata-{platform}.json'
+          output.write_text(json.dumps(metadata, indent=2) + '\n', encoding='utf-8')
+          print(f'Wrote {output.name} with {len(packages)} checked package file(s)')
+          PY
+
+      - name: Upload checked platform artifact
         uses: actions/upload-artifact@v4
         with:
           name: artifact-${{ matrix.platform }}-${{ matrix.arch }}
           path: ./dist
           if-no-files-found: error
-          overwrite: true
+          retention-days: 7
 
-  release-notes:
-    name: Release notes
-    if: ${{ inputs.release_tag != '' }}
-    needs: [build]
+  release:
+    name: Publish complete private prerelease
+    if: ${{ inputs.platform == 'all' && inputs.development_validation_run_url != '' }}
+    needs: [test, windows-helper-test, build]
     runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -338,26 +655,208 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
-      - name: Generate release notes
+      - name: Validate successful development verification run
+        id: validation
+        shell: bash
+        env:
+          DEVELOPMENT_VALIDATION_URL: ${{ inputs.development_validation_run_url }}
+          CLIENT_SOURCE_SHA: ${{ inputs.source_ref }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          run_id="${DEVELOPMENT_VALIDATION_URL%/}"
+          run_id="${run_id##*/}"
+          [[ "$run_id" =~ ^[0-9]+$ ]] || { echo 'Invalid development Actions run ID' >&2; exit 1; }
+          gh api "repos/worldneedme/xxd-build/actions/runs/$run_id" > run.json
+          python3 - run.json <<'PY'
+          import json
+          import sys
+          run = json.load(open(sys.argv[1], encoding='utf-8'))
+          expected_path = '.github/workflows/juicity-hop-smoke.yml'
+          actual_path = (run.get('path') or '').split('@', 1)[0]
+          if run.get('status') != 'completed' or run.get('conclusion') != 'success':
+              raise SystemExit('Development smoke run is not completed successfully')
+          if actual_path != expected_path:
+              raise SystemExit(f'Run is not the Juicity smoke workflow: {actual_path}')
+          print(f"Validated workflow run {run['id']} ({run['conclusion']})")
+          PY
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+
+      - name: Download development verification evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: juicity-subscription-smoke-evidence
+          github-token: ${{ github.token }}
+          repository: worldneedme/xxd-build
+          run-id: ${{ steps.validation.outputs.run_id }}
+          path: ./development-evidence
+
+      - name: Verify exact-source end-to-end results
+        shell: bash
+        env:
+          CLIENT_SOURCE_SHA: ${{ inputs.source_ref }}
+          PANEL_SOURCE_SHA: ${{ inputs.panel_source_sha }}
+          DANGERX_SOURCE_SHA: ${{ inputs.dangerx_validated_source_sha }}
+          DANGERX_BINARY_SHA256: ${{ inputs.dangerx_validated_binary_sha256 }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          path = Path('development-evidence/verification-manifest.json')
+          if not path.is_file():
+              raise SystemExit('Development smoke did not retain verification-manifest.json')
+          result = json.loads(path.read_text(encoding='utf-8'))
+          if result.get('passed') is not True:
+              raise SystemExit('Development smoke manifest is not marked passed')
+          if result.get('client_source_sha') != os.environ['CLIENT_SOURCE_SHA']:
+              raise SystemExit('Development smoke used a different client source SHA')
+          if result.get('panel_source_sha') != os.environ['PANEL_SOURCE_SHA']:
+              raise SystemExit('Development smoke used a different panel source SHA')
+          if result.get('dangerx_validated_source_sha') != os.environ['DANGERX_SOURCE_SHA']:
+              raise SystemExit('Development smoke used a different DangerX source SHA')
+          if result.get('dangerx_validated_binary_sha256') != os.environ['DANGERX_BINARY_SHA256']:
+              raise SystemExit('Development smoke used a different DangerX binary SHA256')
+          if result.get('temporary_resources_cleared') is not True:
+              raise SystemExit('Development smoke temporary resources were not confirmed cleared')
+          baseline = result.get('fixed_port_baseline') or {}
+          if baseline.get('tcp_bytes') != 131072 or baseline.get('udp_echo_ok') != 4:
+              raise SystemExit('Fixed-port baseline results do not match the handover acceptance criteria')
+          rounds = result.get('hop_rounds') or []
+          if len(rounds) != 3:
+              raise SystemExit('Exactly three hopping rounds are required')
+          for expected, row in enumerate(rounds, start=1):
+              if row.get('round') != expected or row.get('tcp_bytes') != 1310720 or row.get('udp_echo_ok') != 40:
+                  raise SystemExit(f'Hopping round {expected} did not meet traffic acceptance criteria')
+              if row.get('max_distinct_ports_per_socket', 0) < 4:
+                  raise SystemExit(f'Hopping round {expected} did not prove port changes on one socket')
+          print('Exact client SHA, fixed-port baseline, three hop rounds and cleanup evidence passed')
+          PY
+
+      - name: Download both checked platform artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: artifact-*
+          path: ./release-staging
+          merge-multiple: true
+
+      - name: Build combined manifest and release notes
         shell: bash
         env:
           RELEASE_TAG: ${{ inputs.release_tag }}
+          CLIENT_SOURCE_SHA: ${{ inputs.source_ref }}
+          PANEL_SOURCE_SHA: ${{ inputs.panel_source_sha }}
+          DANGERX_VALIDATED_SOURCE_SHA: ${{ inputs.dangerx_validated_source_sha }}
+          DANGERX_VALIDATED_BINARY_SHA256: ${{ inputs.dangerx_validated_binary_sha256 }}
+          DEVELOPMENT_VALIDATION_URL: ${{ inputs.development_validation_run_url }}
+          BUILD_WORKFLOW_SHA: ${{ github.sha }}
+          BUILD_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          if [[ ! "$RELEASE_TAG" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
-            echo "Invalid release tag: $RELEASE_TAG" >&2
-            exit 1
-          fi
-          previous_tag=$(curl -fsSL "https://api.github.com/repos/${{ github.repository }}/releases/latest" | sed -nE 's/.*"tag_name": "([^"]+)".*/\1/p' | head -1 || true)
-          bash .github/scripts/generate_release_notes.sh "$previous_tag" release.md
-          version=$(printf '%s' "$RELEASE_TAG" | sed 's/^v//')
-          sed "s|VERSION|$version|g" .github/release_template.md >> release.md
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
 
-      - name: Update release notes
+          root = Path('release-staging')
+          metadata_paths = [root / 'build-metadata-windows.json', root / 'build-metadata-android.json']
+          metadata = [json.loads(path.read_text(encoding='utf-8')) for path in metadata_paths]
+          expected_sha = os.environ['CLIENT_SOURCE_SHA']
+          if any(item.get('client_source_sha') != expected_sha for item in metadata):
+              raise SystemExit('Windows and Android were not built from the same client SHA')
+          if {item.get('platform') for item in metadata} != {'windows', 'android'}:
+              raise SystemExit('Both platform artifacts are required for a release')
+
+          packages = []
+          for item in metadata:
+              for package in item.get('packages', []):
+                  path = root / package['filename']
+                  if not path.is_file():
+                      raise SystemExit(f"Missing package artifact: {path.name}")
+                  digest = hashlib.sha256()
+                  with path.open('rb') as stream:
+                      for block in iter(lambda: stream.read(1024 * 1024), b''):
+                          digest.update(block)
+                  if path.stat().st_size != package['size_bytes'] or digest.hexdigest() != package['sha256']:
+                      raise SystemExit(f"Package hash/size mismatch: {path.name}")
+                  packages.append(package)
+
+          required_patterns = {
+              'Windows installer': lambda name: name.endswith('.exe') and 'windows' in name.lower() and 'setup' in name.lower(),
+              'Windows ZIP': lambda name: name.endswith('.zip') and 'windows' in name.lower(),
+              'Android APK': lambda name: name.endswith('.apk'),
+          }
+          for label, matches in required_patterns.items():
+              if not any(matches(item['filename']) for item in packages):
+                  raise SystemExit(f'Missing required {label}')
+
+          signing_modes = [item.get('android_signing_mode') for item in metadata if item['platform'] == 'android']
+          checks = sorted({check for item in metadata for check in item.get('checks_completed', [])})
+          manifest = {
+              'client_source_sha': expected_sha,
+              'panel_source_sha': os.environ['PANEL_SOURCE_SHA'],
+              'dangerx_validated_source_sha': os.environ['DANGERX_VALIDATED_SOURCE_SHA'],
+              'dangerx_validated_binary_sha256': os.environ['DANGERX_VALIDATED_BINARY_SHA256'],
+              'build_workflow_sha': os.environ['BUILD_WORKFLOW_SHA'],
+              'build_run_url': os.environ['BUILD_RUN_URL'],
+              'development_validation_run_url': os.environ['DEVELOPMENT_VALIDATION_URL'],
+              'platforms_and_arch': {item['platform']: item['arch'] for item in metadata},
+              'toolchain_versions': {
+                  'flutter': metadata[0]['toolchain_versions']['flutter'],
+                  'go': metadata[0]['toolchain_versions']['go'],
+                  'ndk': next(item['toolchain_versions']['ndk'] for item in metadata if item['platform'] == 'android'),
+              },
+              'helper_versions': next(item['helper_versions'] for item in metadata if item['platform'] == 'android'),
+              'android_signing_mode': signing_modes[0] if signing_modes else None,
+              'packages': packages,
+              'checks_completed': checks,
+          }
+          (root / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
+          with (root / 'SHA256SUMS.txt').open('w', encoding='utf-8') as sums:
+              for item in sorted(packages, key=lambda row: row['filename']):
+                  sums.write(f"{item['sha256']}  {item['filename']}\n")
+          print(f"Prepared {len(packages)} package(s), manifest.json and SHA256SUMS.txt")
+          PY
+
+          previous_tag=$(gh api repos/worldneedme/xxd-build/releases/latest --jq .tag_name 2>/dev/null || true)
+          bash .github/scripts/generate_release_notes.sh "$previous_tag" generated-notes.md
+          {
+            cat generated-notes.md
+            printf '\n## Build and validation\n\n- Client SHA: `%s`\n- Panel SHA: `%s`\n- DangerX validated SHA: `%s`\n- DangerX binary SHA256: `%s`\n- Development validation: %s\n- Android signing: `%s`\n- Windows/Android packages use the same client SHA.\n' \
+              "$CLIENT_SOURCE_SHA" "$PANEL_SOURCE_SHA" "$DANGERX_VALIDATED_SOURCE_SHA" "$DANGERX_VALIDATED_BINARY_SHA256" \
+              "$DEVELOPMENT_VALIDATION_URL" "$(python3 -c "import json; print(json.load(open('release-staging/manifest.json'))['android_signing_mode'] or 'unknown')")"
+            printf '\nThe release is hosted in the private `worldneedme/xxd-build` repository. Android packages signed with the debug key use the `.dev` application ID and cannot replace an existing production install.\n'
+          } > release.md
+
+      - name: Recheck tag absence before publishing
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for endpoint in releases/tags git/ref/tags; do
+            status=$(curl -sS -o /dev/null -w '%{http_code}' \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              "https://api.github.com/repos/worldneedme/xxd-build/$endpoint/$RELEASE_TAG")
+            [[ "$status" == 404 ]] || { echo "Refusing to overwrite an existing release/tag (HTTP $status)" >&2; exit 1; }
+          done
+
+      - name: Publish private prerelease after all gates
         uses: softprops/action-gh-release@v2
         with:
-          name: WONDERX V1 ${{ inputs.release_tag }}
+          name: WONDERX V1 Juicity compatibility ${{ inputs.release_tag }}
           repository: worldneedme/xxd-build
           token: ${{ github.token }}
           tag_name: ${{ inputs.release_tag }}
           target_commitish: main
           body_path: release.md
+          prerelease: true
+          make_latest: false
+          files: |
+            ./release-staging/*
+          fail_on_unmatched_files: true

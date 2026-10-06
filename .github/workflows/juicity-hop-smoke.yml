@@ -1,7 +1,32 @@
-name: Isolated HK Juicity hop smoke
+name: Isolated HK Juicity subscription smoke
 
 on:
   workflow_dispatch:
+    inputs:
+      client_source_sha:
+        description: Exact client commit to parse and test
+        required: true
+        type: string
+      capture_server_ipv4:
+        description: Verified IPv4 address of the isolated development test node
+        required: true
+        type: string
+      base_port:
+        description: Isolated Juicity base UDP port
+        required: true
+        type: string
+      hop_ports:
+        description: Isolated hop range in start-end form
+        required: true
+        type: string
+      target_tcp_port:
+        description: Isolated loopback TCP echo service port on HK
+        required: true
+        type: string
+      target_udp_port:
+        description: Isolated loopback UDP echo service port on HK
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -13,66 +38,152 @@ concurrency:
 jobs:
   smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
           path: runner
           persist-credentials: false
+
       - uses: actions/checkout@v4
         with:
           repository: worldneedme/xxdmanfl0609
-          ref: fe5b3f7a3c967b771ac9149e627851ede00614b4
+          ref: ${{ inputs.client_source_sha }}
           ssh-key: ${{ secrets.SOURCE_READ_KEY }}
           path: source
           persist-credentials: false
+
+      - name: Validate isolated endpoint inputs and immutable source
+        shell: bash
+        env:
+          CLIENT_SOURCE_SHA: ${{ inputs.client_source_sha }}
+          CAPTURE_SERVER_IPV4: ${{ inputs.capture_server_ipv4 }}
+          BASE_PORT: ${{ inputs.base_port }}
+          HOP_PORTS: ${{ inputs.hop_ports }}
+          TARGET_TCP_PORT: ${{ inputs.target_tcp_port }}
+          TARGET_UDP_PORT: ${{ inputs.target_udp_port }}
+        run: |
+          set -euo pipefail
+          [[ "$CLIENT_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'client_source_sha must be a full commit SHA' >&2; exit 1; }
+          test "$(git -C source rev-parse HEAD)" = "$CLIENT_SOURCE_SHA"
+          python3 - <<'PY'
+          import ipaddress
+          import os
+          import re
+          ipaddress.IPv4Address(os.environ['CAPTURE_SERVER_IPV4'])
+          for name in ('BASE_PORT', 'TARGET_TCP_PORT', 'TARGET_UDP_PORT'):
+              value = int(os.environ[name])
+              if not 1 <= value <= 65535:
+                  raise SystemExit(f'{name} is outside 1..65535')
+          match = re.fullmatch(r'([0-9]+)-([0-9]+)', os.environ['HOP_PORTS'])
+          if not match:
+              raise SystemExit('HOP_PORTS must be a numeric start-end range')
+          start, end = map(int, match.groups())
+          base = int(os.environ['BASE_PORT'])
+          if not 1 <= start <= end <= 65535 or end - start + 1 < 4:
+              raise SystemExit('HOP_PORTS must be a valid range with at least four ports')
+          if start <= base <= end:
+              raise SystemExit('The base port must not overlap the hop range')
+          PY
+
       - uses: actions/setup-go@v5
         with:
           go-version: '1.26.4'
           cache-dependency-path: source/core/Clash.Meta/go.sum
-      - name: Compile actual custom outbound and run hopping unit tests
+
+      - name: Test config parser and Juicity hop regression
         working-directory: source/core/Clash.Meta
         run: |
-          mkdir -p cmd/juicity-hop-smoke
-          cp "$GITHUB_WORKSPACE/runner/smoke/juicity-hop/main.go" cmd/juicity-hop-smoke/main.go
-          go test ./adapter/outbound -run 'TestJuicity(Hop|Hopper|Underlay)' -count=1 -timeout=3m
-          go build -o "$GITHUB_WORKSPACE/hop-smoke" ./cmd/juicity-hop-smoke
-      - name: Baseline and three long lived TCP/UDP hopping rounds
+          go test ./config ./adapter/outbound \
+            -run 'TestParseHelperBackedProtocolConfig|TestJuicity(Hop|Hopper|Underlay)' \
+            -count=1 -timeout=180s
+
+      - name: Build smoke against the exact client core
+        working-directory: source/core/Clash.Meta
+        run: |
+          go build -o "$RUNNER_TEMP/juicity-subscription-smoke" "$GITHUB_WORKSPACE/runner/smoke/juicity-hop/main.go"
+
+      - name: Test fixed-port export and three live hop rounds
         env:
-          HKDEV_UUID: ${{ secrets.HKDEV_UUID }}
-          HKDEV_PASSWORD: ${{ secrets.HKDEV_PASSWORD }}
+          HKDEV_TEST_SUBSCRIPTION_URL: ${{ secrets.HKDEV_TEST_SUBSCRIPTION_URL }}
+          CLIENT_SOURCE_SHA: ${{ inputs.client_source_sha }}
+          CAPTURE_SERVER_IPV4: ${{ inputs.capture_server_ipv4 }}
+          BASE_PORT: ${{ inputs.base_port }}
+          HOP_PORTS: ${{ inputs.hop_ports }}
+          TARGET_TCP_PORT: ${{ inputs.target_tcp_port }}
+          TARGET_UDP_PORT: ${{ inputs.target_udp_port }}
+          PANEL_SOURCE_SHA: 9edd6a73dce72454c67e54c6411991100c5fff5b
+          DANGERX_VALIDATED_SOURCE_SHA: be4c7bfd43f1a2b02b201dbff9dd9818956991ce
+          DANGERX_VALIDATED_BINARY_SHA256: bf2e1ab783ca18a12d956a0e7de72ccac28fa79888ee673ca5ef0f7eaa39ba9d
         run: |
           set -euo pipefail
-          test -n "$HKDEV_UUID"
-          test -n "$HKDEV_PASSWORD"
-          sudo tcpdump -i any -Q out -nn -tt -l 'udp and dst host 69.33.211.38 and (dst port 10444 or dst portrange 31000-31020)' > ports.log 2> capture-status.log &
-          CAPTURE_PID=$!
-          trap 'sudo kill -INT "$CAPTURE_PID" 2>/dev/null || true' EXIT
+          test -n "$HKDEV_TEST_SUBSCRIPTION_URL" || {
+            echo 'The dedicated HKDEV_TEST_SUBSCRIPTION_URL secret is not configured; legacy account secrets are not accepted.' >&2
+            exit 1
+          }
+          IFS='-' read -r HOP_START HOP_END <<< "$HOP_PORTS"
+          export HOP_START HOP_END
+          tcpdump_filter="udp and dst host $CAPTURE_SERVER_IPV4 and (dst port $BASE_PORT or dst portrange $HOP_START-$HOP_END)"
+          sudo tcpdump -i any -Q out -nn -tt -l "$tcpdump_filter" > ports.log 2> capture-status.log &
+          capture_pid=$!
+          trap 'sudo kill -INT "$capture_pid" 2>/dev/null || true' EXIT
           sleep 1
-          SMOKE_MODE=baseline SMOKE_ROUND=0 timeout 90s ./hop-smoke | tee results.jsonl
-          for ROUND in 1 2 3; do
-            SMOKE_MODE=hop SMOKE_ROUND="$ROUND" timeout 90s ./hop-smoke | tee -a results.jsonl
+          SMOKE_MODE=baseline SMOKE_ROUND=0 timeout 90s "$RUNNER_TEMP/juicity-subscription-smoke" | tee results.jsonl
+          for round in 1 2 3; do
+            SMOKE_MODE=hop SMOKE_ROUND="$round" timeout 90s "$RUNNER_TEMP/juicity-subscription-smoke" | tee -a results.jsonl
           done
-          sudo kill -INT "$CAPTURE_PID"
-          wait "$CAPTURE_PID" || true
+          sudo kill -INT "$capture_pid"
+          wait "$capture_pid" || true
           trap - EXIT
-          python3 runner/smoke/juicity-hop/summary.py
+          python3 runner/smoke/juicity-hop/summary.py > summary.log
+          cat summary.log
           python3 - <<'PY'
-          import json, os
-          rows = json.load(open('summary.json'))
-          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as out:
-              out.write('|Mode|Round|TCP bytes verified|UDP echoes|Distinct destination ports|\n|---|---|---|---|---|\n')
-              for r in rows:
-                  out.write(f"|{r['mode']}|{r['round']}|{r['tcp_bytes']}|{r['udp_echo_ok']}|{r['max_distinct_ports_per_socket']}|\n")
+          import json
+          import os
+          from pathlib import Path
+          rows = json.loads(Path('summary.json').read_text(encoding='utf-8'))
+          baseline = rows[0]
+          manifest = {
+              'passed': True,
+              'client_source_sha': os.environ['CLIENT_SOURCE_SHA'],
+              'panel_source_sha': os.environ['PANEL_SOURCE_SHA'],
+              'dangerx_validated_source_sha': os.environ['DANGERX_VALIDATED_SOURCE_SHA'],
+              'dangerx_validated_binary_sha256': os.environ['DANGERX_VALIDATED_BINARY_SHA256'],
+              'fixed_port_baseline': {
+                  'tcp_bytes': baseline['tcp_bytes'],
+                  'udp_echo_ok': baseline['udp_echo_ok'],
+                  'destination_ports': baseline['destination_ports'],
+              },
+              'hop_rounds': [
+                  {
+                      'round': row['round'],
+                      'tcp_bytes': row['tcp_bytes'],
+                      'udp_echo_ok': row['udp_echo_ok'],
+                      'destination_ports': row['destination_ports'],
+                      'max_distinct_ports_per_socket': row['max_distinct_ports_per_socket'],
+                  }
+                  for row in rows[1:]
+              ],
+              'temporary_resources_cleared': False,
+              'cleanup_status': 'pending separate HK development-host verification; this runner has no server SSH credential',
+          }
+          Path('verification-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as output:
+              output.write('|Mode|Round|TCP bytes verified|UDP echoes|Distinct destination ports per socket|\n|---|---:|---:|---:|---:|\n')
+              for row in rows:
+                  output.write(f"|{row['mode']}|{row['round']}|{row['tcp_bytes']}|{row['udp_echo_ok']}|{row['max_distinct_ports_per_socket']}|\n")
           PY
-      - name: Retain only test evidence
+
+      - name: Retain only sanitized data-plane evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: isolated-hk-hop-evidence
+          name: juicity-subscription-smoke-evidence
           path: |
             summary.json
             results.jsonl
+            summary.log
+            verification-manifest.json
             ports.log
             capture-status.log
           retention-days: 7
