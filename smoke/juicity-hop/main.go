@@ -55,6 +55,13 @@ func run() error {
 		return errors.New("SMOKE_MODE must be baseline or hop")
 	}
 
+	geoDir, err := os.MkdirTemp("", "juicity-smoke-geo")
+	if err != nil {
+		return fmt.Errorf("could not create geo data directory: %w", err)
+	}
+	defer os.RemoveAll(geoDir)
+	C.SetHomeDir(geoDir)
+
 	basePort, err := requiredPort("BASE_PORT")
 	if err != nil {
 		return err
@@ -271,6 +278,11 @@ func fetchSubscription(ctx context.Context, userAgent string) ([]byte, error) {
 }
 
 func parseSubscriptionProxy(body []byte, expectHop bool, basePort, hopStart, hopEnd int) (C.Proxy, rawProxy, error) {
+	if !bytes.Contains(body, []byte("geox-url")) {
+		body = append([]byte("geox-url:
+  mmdb: \"https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/country.mmdb\"
+"), body...)
+	}
 	var shape rawConfig
 	if err := yaml.Unmarshal(body, &shape); err != nil {
 		return nil, rawProxy{}, errors.New("the real subscription is not valid Clash YAML")
