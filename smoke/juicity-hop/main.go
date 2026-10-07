@@ -279,9 +279,7 @@ func fetchSubscription(ctx context.Context, userAgent string) ([]byte, error) {
 
 func parseSubscriptionProxy(body []byte, expectHop bool, basePort, hopStart, hopEnd int) (C.Proxy, rawProxy, error) {
 	if !bytes.Contains(body, []byte("geox-url")) {
-		body = append([]byte("geox-url:
-  mmdb: \"https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/country.mmdb\"
-"), body...)
+		body = append([]byte("geox-url:\n  mmdb: \"https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/country.mmdb\"\n"), body...)
 	}
 	var shape rawConfig
 	if err := yaml.Unmarshal(body, &shape); err != nil {
