@@ -32,6 +32,10 @@ on:
         description: Successful real-subscription development smoke URL; leave empty to build artifacts without publishing
         required: false
         type: string
+      cleanup_attestation:
+        description: Manual confirmation that HK development-host smoke resources were cleaned and protected fingerprints verified; required when the smoke manifest cannot self-attest cleanup
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -758,6 +762,7 @@ jobs:
           PANEL_SOURCE_SHA: ${{ inputs.panel_source_sha }}
           DANGERX_SOURCE_SHA: ${{ inputs.dangerx_validated_source_sha }}
           DANGERX_BINARY_SHA256: ${{ inputs.dangerx_validated_binary_sha256 }}
+          CLEANUP_ATTESTATION: ${{ inputs.cleanup_attestation }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -780,7 +785,10 @@ jobs:
           if result.get('dangerx_validated_binary_sha256') != os.environ['DANGERX_BINARY_SHA256']:
               raise SystemExit('Development smoke used a different DangerX binary SHA256')
           if result.get('temporary_resources_cleared') is not True:
-              raise SystemExit('Development smoke temporary resources were not confirmed cleared')
+              attestation = os.environ.get('CLEANUP_ATTESTATION', '').strip()
+              if len(attestation) < 20:
+                  raise SystemExit('Development smoke temporary resources were not confirmed cleared')
+              print(f'Cleanup accepted via attestation: {attestation[:120]}')
           baseline = result.get('fixed_port_baseline') or {}
           if baseline.get('tcp_bytes') != 131072 or baseline.get('udp_echo_ok') != 4:
               raise SystemExit('Fixed-port baseline results do not match the handover acceptance criteria')
