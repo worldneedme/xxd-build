@@ -796,7 +796,7 @@ jobs:
           if len(rounds) != 3:
               raise SystemExit('Exactly three hopping rounds are required')
           for expected, row in enumerate(rounds, start=1):
-              if row.get('round') != expected or row.get('tcp_bytes') != 1310720 or row.get('udp_echo_ok') != 40:
+              if str(row.get('round')) != str(expected) or row.get('tcp_bytes') != 1310720 or row.get('udp_echo_ok') != 40:
                   raise SystemExit(f'Hopping round {expected} did not meet traffic acceptance criteria')
               if row.get('max_distinct_ports_per_socket', 0) < 4:
                   raise SystemExit(f'Hopping round {expected} did not prove port changes on one socket')
