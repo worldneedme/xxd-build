@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/metacubex/mihomo/config"
+	_ "github.com/metacubex/mihomo/hub/executor"
 	C "github.com/metacubex/mihomo/constant"
 	"gopkg.in/yaml.v3"
 )
