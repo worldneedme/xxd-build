@@ -60,12 +60,17 @@ function Wait-Link([string]$marker) {
     throw ('No import event or dialog observed for ' + $marker + '. Check isolated smoke logs.')
 }
 function Dismiss-Confirmation {
-    $elements = Dialog-Elements
-    $cancel = $elements | Where-Object { $_.Current.Name -match '^(Cancel|取消)$' } | Select-Object -First 1
-    if ($cancel) {
-        $cancel.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
-        return $true
+    $deadline = (Get-Date).AddSeconds(20)
+    while ((Get-Date) -lt $deadline) {
+        $elements = Dialog-Elements
+        $cancel = $elements | Where-Object { $_.Current.Name -match '^(Cancel|取消)$' } | Select-Object -First 1
+        if ($cancel) {
+            $cancel.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
+            return $true
+        }
+        Start-Sleep -Milliseconds 500
     }
+    $report.automation_names = @($elements | ForEach-Object { $_.Current.Name } | Where-Object { $_ } | Select-Object -First 25)
     return $false
 }
 try {
@@ -79,7 +84,7 @@ try {
     $app = Start-Process -FilePath $exe -WorkingDirectory $installRoot -WindowStyle Hidden -PassThru -ArgumentList ('"' + $coldLink + '"') -RedirectStandardOutput $stdout -RedirectStandardError $stderr
     $report.cold_evidence = Wait-Link ('smoke-cold-' + $env:GITHUB_RUN_ID)
     $report.cold=$true
-    $report.confirmation = Dismiss-Confirmation
+    $report.cold_confirmation = Dismiss-Confirmation
     $warmUrl = 'https://example.invalid/subscription?token=smoke-warm-' + $env:GITHUB_RUN_ID + '&flag=meta'
     $warmLink = 'flclash://install-config?name=WonderX&url=' + [Uri]::EscapeDataString($warmUrl)
     $registry = Get-ItemProperty -LiteralPath 'Registry::HKEY_CURRENT_USER\Software\Classes\flclash\shell\open\command'
@@ -87,7 +92,8 @@ try {
     Start-Process -FilePath $warmLink
     $report.warm_evidence = Wait-Link ('smoke-warm-' + $env:GITHUB_RUN_ID)
     $report.warm=$true
-    $report.confirmation = (Dismiss-Confirmation) -or $report.confirmation
+    $report.warm_confirmation = Dismiss-Confirmation
+    $report.confirmation = $report.cold_confirmation -and $report.warm_confirmation
     $ownedApps = @(Owned-Processes | Where-Object { $_.Name -eq 'FlClash.exe' })
     if ($ownedApps.Count -ne 1 -or $ownedApps[0].ProcessId -ne $app.Id) { throw 'Warm import created a second running instance.' }
     $report.same_instance=$true
