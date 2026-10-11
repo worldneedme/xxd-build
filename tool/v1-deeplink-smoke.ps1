@@ -28,7 +28,13 @@ function Owned-Processes {
 }
 function Read-Logs {
     $logText = ''
-    foreach ($file in @($stdout,$stderr)) { if (Test-Path -LiteralPath $file) { $logText += [IO.File]::ReadAllText($file) } }
+    foreach ($file in @($stdout,$stderr)) {
+        if (Test-Path -LiteralPath $file) {
+            $stream = [IO.File]::Open($file,[IO.FileMode]::Open,[IO.FileAccess]::Read,([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+            $reader = [IO.StreamReader]::new($stream)
+            try { $logText += $reader.ReadToEnd() } finally { $reader.Dispose() }
+        }
+    }
     $logText
 }
 Add-Type -AssemblyName UIAutomationClient

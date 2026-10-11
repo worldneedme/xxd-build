@@ -23,15 +23,9 @@ jobs:
         run: ./tool/v1-deeplink-smoke.ps1 -ReleaseTag $env:SMOKE_RELEASE_TAG
       - name: Save isolated import diagnostics
         if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: v1-import-smoke
-          path: ${{ runner.temp }}/v1-import-${{ github.run_id }}/*.log
-          retention-days: 7
-      - name: Save import result
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: v1-import-result
-          path: ${{ runner.temp }}/v1-import-${{ github.run_id }}/report.json
-          retention-days: 7
+        shell: pwsh
+        run: |
+          $smokeRoot = Join-Path $env:RUNNER_TEMP ('v1-import-' + $env:GITHUB_RUN_ID)
+          Get-ChildItem -LiteralPath $smokeRoot -Filter '*.log' | ForEach-Object { Get-Content -LiteralPath $_.FullName -Tail 25 }
+          $report = Join-Path $smokeRoot 'report.json'
+          if (Test-Path -LiteralPath $report) { Get-Content -LiteralPath $report | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append }
