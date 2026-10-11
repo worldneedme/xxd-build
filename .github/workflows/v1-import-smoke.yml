@@ -19,6 +19,7 @@ jobs:
         shell: pwsh
         env:
           SMOKE_RELEASE_TAG: ${{ inputs.release_tag }}
+          GH_TOKEN: ${{ github.token }}
         run: ./tool/v1-deeplink-smoke.ps1 -ReleaseTag $env:SMOKE_RELEASE_TAG
       - name: Save isolated import diagnostics
         if: always()

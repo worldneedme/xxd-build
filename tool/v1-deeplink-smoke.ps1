@@ -5,11 +5,14 @@ if (-not $smokeRoot.StartsWith($env:RUNNER_TEMP, [StringComparison]::OrdinalIgno
 New-Item -ItemType Directory -Path $smokeRoot | Out-Null
 $installRoot = Join-Path $smokeRoot 'install'
 $headers = @{ 'Accept'='application/vnd.github+json'; 'User-Agent'='WonderX-import-smoke' }
+if ($env:GH_TOKEN) { $headers.Authorization = 'Bearer ' + $env:GH_TOKEN }
 $release = Invoke-RestMethod -Uri ('https://api.github.com/repos/worldneedme/xxd-build/releases/tags/' + [Uri]::EscapeDataString($ReleaseTag)) -Headers $headers
 $asset = @($release.assets | Where-Object { $_.name -like '*-windows-amd64-setup.exe' })
 if ($asset.Count -ne 1 -or $asset[0].digest -notmatch '^sha256:[0-9a-f]{64}$') { throw 'Expected exactly one checksummed Windows installer.' }
 $setup = Join-Path $smokeRoot $asset[0].name
-Invoke-WebRequest -Uri $asset[0].browser_download_url -OutFile $setup
+$downloadHeaders = @{ 'Accept'='application/octet-stream'; 'User-Agent'='WonderX-import-smoke' }
+if ($env:GH_TOKEN) { $downloadHeaders.Authorization = 'Bearer ' + $env:GH_TOKEN }
+Invoke-WebRequest -Uri $asset[0].url -Headers $downloadHeaders -OutFile $setup
 if ((Get-FileHash -LiteralPath $setup -Algorithm SHA256).Hash.ToLowerInvariant() -ne $asset[0].digest.Substring(7)) { throw 'Installer checksum failed.' }
 if (Get-CimInstance Win32_Process | Where-Object { $_.Name -in @('FlClash.exe','FlClashCore.exe','FlClashHelperService.exe') }) { throw 'Refusing to run installer with preexisting app processes.' }
 $appSupport = Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'com.follow\WONDERX V1'
