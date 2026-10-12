@@ -305,13 +305,15 @@ jobs:
       - name: Download Naive helper for Android
         if: matrix.platform == 'android'
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           retry=(--retry 4 --retry-delay 6 --retry-all-errors)
           version='${{ env.NAIVE_VERSION }}'
           expected='${{ env.NAIVE_APK_SHA256 }}'
           apk="naiveproxy-plugin-${version}-arm64-v8a.apk"
-          release_json=$(curl -fsSL "${retry[@]}" \
+          release_json=$(curl -fsSL "${retry[@]}" -H "Authorization: Bearer ${GH_TOKEN}" \
             "https://api.github.com/repos/klzgrad/naiveproxy/releases/tags/$version")
           release_digest=$(python3 -c 'import json, sys; release=json.load(sys.stdin); assets=[asset for asset in release.get("assets", []) if asset.get("name") == sys.argv[1]]; print(assets[0].get("digest", "") if len(assets) == 1 else "")' \
             "$apk" <<< "$release_json")
