@@ -223,6 +223,14 @@ jobs:
           ssh-key: ${{ secrets.SOURCE_READ_KEY }}
           persist-credentials: false
 
+      - name: Checkout build workflow tools
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.sha }}
+          path: _build_tools
+          persist-credentials: false
+
       - name: Verify immutable source checkout
         shell: bash
         run: |
@@ -338,7 +346,7 @@ jobs:
 
       - name: Report package footprint
         shell: bash
-        run: python3 .github/scripts/report_package_footprint.py ./dist | tee -a "$GITHUB_STEP_SUMMARY"
+        run: python3 _build_tools/.github/scripts/report_package_footprint.py ./dist | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Verify Android native core bridge
         if: matrix.platform == 'android'
