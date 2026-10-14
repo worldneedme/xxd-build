@@ -336,6 +336,10 @@ jobs:
           ANDROID_NDK_HOME: ${{ steps.build-ndk.outputs.ndk-path }}
         run: dart setup.dart ${{ matrix.platform }} ${{ env.IS_STABLE == 'true' && '--env stable' || '' }} ${{ matrix.android_arch && format('--arch {0}', matrix.android_arch) || '' }} -v
 
+      - name: Report package footprint
+        shell: bash
+        run: python3 .github/scripts/report_package_footprint.py ./dist | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: Verify Android native core bridge
         if: matrix.platform == 'android'
         id: android-check
