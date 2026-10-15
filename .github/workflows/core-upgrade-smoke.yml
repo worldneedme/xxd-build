@@ -56,11 +56,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          diff="$(gofmt -d core/hub.go core/Clash.Meta/adapter/outbound/sudoku.go core/Clash.Meta/transport/sudoku/httpmask_tunnel.go)"
-          if [[ -n "$diff" ]]; then
-            printf "%s\n" "$diff"
-            exit 1
-          fi
+          set +e
+          gofmt -d core/hub.go core/Clash.Meta/adapter/outbound/sudoku.go core/Clash.Meta/transport/sudoku/httpmask_tunnel.go > "/gofmt.diff" 2>&1
+          format_status=0
+          set -e
+          cat "/gofmt.diff"
+          printf "gofmt exit status: %s; diff bytes: %s\n" "" "0 0wc -c < "/gofmt.diff")"
+          test "" -eq 0
+          test ! -s "/gofmt.diff"
 
       - name: Test WONDERX core protocol regressions
         working-directory: core/Clash.Meta
