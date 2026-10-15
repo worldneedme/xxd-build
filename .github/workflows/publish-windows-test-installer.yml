@@ -1,0 +1,108 @@
+name: Publish Windows test installer
+on:
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - name: Verify private repository, source run, and unused tag
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "worldneedme/xxd-build"
+          test "$(gh api "repos/$GITHUB_REPOSITORY" --jq .private)" = "true"
+
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/38677626403" > "$RUNNER_TEMP/source-run.json"
+          python3 - "$RUNNER_TEMP/source-run.json" <<'PY'
+          import json, sys
+          run = json.load(open(sys.argv[1], encoding="utf-8"))
+          if run.get("status") != "completed" or run.get("conclusion") != "success":
+              raise SystemExit("Source build run did not complete successfully")
+          if run.get("path") != ".github/workflows/build-v1.yml":
+              raise SystemExit("Unexpected source workflow")
+          if run.get("head_sha") != "9956ccc99f8e41e0bb0eba039b4eef0681aa6741":
+              raise SystemExit("Unexpected build workflow commit")
+          PY
+
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/38677626403/artifacts" > "$RUNNER_TEMP/source-artifacts.json"
+          python3 - "$RUNNER_TEMP/source-artifacts.json" <<'PY'
+          import json, sys
+          artifacts = json.load(open(sys.argv[1], encoding="utf-8")).get("artifacts", [])
+          matches = [a for a in artifacts if a.get("id") == 11947463028 and a.get("name") == "artifact-windows-amd64"]
+          if len(matches) != 1 or matches[0].get("expired"):
+              raise SystemExit("Expected Windows artifact is missing or expired")
+          PY
+
+          for endpoint in             "releases/tags/flclash-0.9.0-windows-test-20261015-run-38677626403"             "git/ref/tags/flclash-0.9.0-windows-test-20261015-run-38677626403"; do
+            status=$(curl -sS -o /dev/null -w '%{http_code}' \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              "https://api.github.com/repos/$GITHUB_REPOSITORY/$endpoint")
+            test "$status" = "404"
+          done
+
+      - name: Download the exact Windows artifact from the successful CI run
+        uses: actions/download-artifact@v4
+        with:
+          name: artifact-windows-amd64
+          github-token: ${{ github.token }}
+          repository: worldneedme/xxd-build
+          run-id: 38677626403
+          path: staging
+
+      - name: Verify installer SHA and source manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+
+          root = Path("staging")
+          filename = "FlClash-0.9.0-windows-amd64-setup.exe"
+          expected_sha = "6b4ced2f4fd9794b577c7aba8f6149c60233f88ed4470ec1a665c05d671a9bc2"
+          exe = root / filename
+          metadata_path = root / "build-metadata-windows.json"
+          if not exe.is_file() or not metadata_path.is_file():
+              raise SystemExit("Installer or Windows build manifest is missing")
+          metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+          if metadata.get("client_source_sha") != "54cae29084f355763a30818627dd7ff162121fa5":
+              raise SystemExit("Unexpected client source SHA")
+          records = [p for p in metadata.get("packages", []) if p.get("filename") == filename]
+          if len(records) != 1:
+              raise SystemExit("Installer is not uniquely recorded in the manifest")
+          digest = hashlib.sha256(exe.read_bytes()).hexdigest()
+          if digest != expected_sha or records[0].get("sha256") != expected_sha:
+              raise SystemExit("Installer SHA256 does not match the verified CI output")
+          if exe.stat().st_size != records[0].get("size_bytes"):
+              raise SystemExit("Installer size differs from the verified CI manifest")
+          print(f"Verified {filename}, SHA256 {digest}")
+          PY
+          sha256sum staging/FlClash-0.9.0-windows-amd64-setup.exe \
+            > staging/FlClash-0.9.0-windows-amd64-setup.exe.sha256
+
+      - name: Publish private test prerelease with the standalone EXE
+        uses: softprops/action-gh-release@v2
+        with:
+          repository: worldneedme/xxd-build
+          token: ${{ github.token }}
+          tag_name: flclash-0.9.0-windows-test-20261015-run-38677626403
+          target_commitish: main
+          name: FlClash 0.9.0 Windows installer - private test
+          body: |
+            Private test-only Windows installer for local device validation.
+
+            Client source SHA: 54cae29084f355763a30818627dd7ff162121fa5
+            Original successful CI run: https://github.com/worldneedme/xxd-build/actions/runs/38677626403
+            Windows install/startup CI checks passed. Real subscription end-to-end and user-device testing are not yet complete; this is not the final cross-platform release.
+          prerelease: true
+          make_latest: false
+          files: |
+            staging/FlClash-0.9.0-windows-amd64-setup.exe
+            staging/FlClash-0.9.0-windows-amd64-setup.exe.sha256
+          fail_on_unmatched_files: true
