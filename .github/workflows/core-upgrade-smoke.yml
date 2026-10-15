@@ -1,0 +1,84 @@
+name: FlClash 0.9.0 core smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Immutable client source commit SHA
+        required: true
+        type: string
+      smoke_number:
+        description: Sequential smoke run number (1-3)
+        required: true
+        type: choice
+        options:
+          - "1"
+          - "2"
+          - "3"
+
+permissions:
+  contents: read
+
+jobs:
+  core-smoke:
+    name: Core smoke ${{ inputs.smoke_number }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate immutable source ref
+        shell: bash
+        env:
+          SOURCE_REF: ${{ inputs.source_ref }}
+          SMOKE_NUMBER: ${{ inputs.smoke_number }}
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_REF" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$SMOKE_NUMBER" =~ ^[123]$ ]]
+          printf "Core smoke %s on source %s\n" "$SMOKE_NUMBER" "$SOURCE_REF"
+
+      - name: Checkout exact private client source
+        uses: actions/checkout@v4
+        with:
+          repository: worldneedme/xxdmanfl0609
+          ref: ${{ inputs.source_ref }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.1"
+          cache: true
+          cache-dependency-path: |
+            core/go.sum
+            core/Clash.Meta/go.sum
+
+      - name: Check Go formatting
+        shell: bash
+        run: |
+          set -euo pipefail
+          diff="$(gofmt -d core/hub.go core/Clash.Meta/adapter/outbound/sudoku.go core/Clash.Meta/transport/sudoku/httpmask_tunnel.go)"
+          if [[ -n "$diff" ]]; then
+            printf "%s\n" "$diff"
+            exit 1
+          fi
+
+      - name: Test WONDERX core protocol regressions
+        working-directory: core/Clash.Meta
+        run: |
+          go test ./adapter ./config ./adapter/outbound \
+            -run "TestParseHelperBackedProtocols|TestParseHelperBackedProtocolConfig|TestNaiveProxyPasswordOnlyAndStablePort|TestJuicityNativeConstruction|TestJuicityNativeUsesFirstHopPort|TestJuicity(Hop|Hopper|Underlay)|TestMieru" \
+            -count=1 -timeout=240s
+
+      - name: Test Sudoku HTTP-mask implementation
+        working-directory: core/Clash.Meta
+        run: |
+          go test ./transport/sudoku/... -count=1 -timeout=240s
+          go test ./transport/sudoku/obfs/httpmask -count=1 -timeout=240s
+
+      - name: Test Go core wrapper
+        working-directory: core
+        env:
+          CGO_ENABLED: 0
+        run: |
+          go test .
+          go vet .
