@@ -370,18 +370,6 @@ jobs:
               output.write(f'## Android native unit tests\n\n{summary}\n')
           PY
 
-      - name: Retain Android unit-test reports
-        if: ${{ always() && matrix.platform == 'android' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: android-unit-test-reports-${{ github.run_id }}
-          path: |
-            build/common/test-results/testDebugUnitTest/TEST-*.xml
-            build/service/test-results/testDebugUnitTest/TEST-*.xml
-            build/app/test-results/testDebugUnitTest/TEST-*.xml
-          if-no-files-found: warn
-          retention-days: 7
-
       - name: Verify Android native core bridge
         if: matrix.platform == 'android'
         id: android-check
@@ -651,6 +639,7 @@ jobs:
       - name: Retain Windows startup logs on failure
         if: ${{ failure() && matrix.platform == 'windows' }}
         uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: windows-startup-logs-${{ github.run_id }}
           path: |
@@ -741,13 +730,11 @@ jobs:
           print(f'Wrote {output.name} with {len(packages)} checked package file(s)')
           PY
 
-      - name: Upload checked platform artifact
-        uses: actions/upload-artifact@v4
+      - name: Save checked platform package cache
+        uses: actions/cache/save@v4
         with:
-          name: artifact-${{ matrix.platform }}-${{ matrix.arch }}
           path: ./dist
-          if-no-files-found: error
-          retention-days: 7
+          key: xxd-build-dist-${{ github.run_id }}-${{ matrix.platform }}-${{ matrix.arch }}
 
   release:
     name: Publish complete private prerelease
@@ -851,12 +838,19 @@ jobs:
           print('Exact client SHA, fixed-port baseline, three hop rounds and cleanup evidence passed')
           PY
 
-      - name: Download both checked platform artifacts
-        uses: actions/download-artifact@v4
+      - name: Restore checked Windows package cache
+        uses: actions/cache/restore@v4
         with:
-          pattern: artifact-*
           path: ./release-staging
-          merge-multiple: true
+          key: xxd-build-dist-${{ github.run_id }}-windows-amd64
+          fail-on-cache-miss: true
+
+      - name: Restore checked Android package cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ./release-staging
+          key: xxd-build-dist-${{ github.run_id }}-android-arm64-v8a
+          fail-on-cache-miss: true
 
       - name: Build combined manifest and release notes
         shell: bash

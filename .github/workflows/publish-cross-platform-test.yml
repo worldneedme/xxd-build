@@ -51,16 +51,19 @@ jobs:
             exit 1
           fi
 
-      - name: Download both checked platform artifacts
-        env:
-          GH_TOKEN: ${{ github.token }}
-          BUILD_RUN_ID: ${{ inputs.build_run_id }}
-        run: |
-          set -euo pipefail
-          gh run download "$BUILD_RUN_ID" --repo "$GITHUB_REPOSITORY" \
-            --name artifact-windows-amd64 --dir packages/windows
-          gh run download "$BUILD_RUN_ID" --repo "$GITHUB_REPOSITORY" \
-            --name artifact-android-arm64-v8a --dir packages/android
+      - name: Restore checked Windows package cache
+        uses: actions/cache/restore@v4
+        with:
+          path: packages/windows
+          key: xxd-build-dist-${{ inputs.build_run_id }}-windows-amd64
+          fail-on-cache-miss: true
+
+      - name: Restore checked Android package cache
+        uses: actions/cache/restore@v4
+        with:
+          path: packages/android
+          key: xxd-build-dist-${{ inputs.build_run_id }}-android-arm64-v8a
+          fail-on-cache-miss: true
 
       - name: Verify manifests and package checksums
         env:
