@@ -61,10 +61,19 @@ jobs:
           set -e
           if test "$status" = 0; then
             echo 'Regression suite unexpectedly passed on the unfixed layout'
+            cat "$RUNNER_TEMP/navigation-before.log"
             exit 1
           fi
-          grep -F 'Expected: <80.0>' "$RUNNER_TEMP/navigation-before.log"
-          grep -E 'Actual: <(104|128)\.0>' "$RUNNER_TEMP/navigation-before.log"
+          if ! grep -Eq 'Expected: <80(\.0+)?>' "$RUNNER_TEMP/navigation-before.log"; then
+            echo 'Unfixed layout did not fail on the expected 80px dock height.'
+            cat "$RUNNER_TEMP/navigation-before.log"
+            exit 1
+          fi
+          if ! grep -Eq 'Actual: <(104|128)(\.0+)?>' "$RUNNER_TEMP/navigation-before.log"; then
+            echo 'Unfixed layout failed for an unexpected height or another reason.'
+            cat "$RUNNER_TEMP/navigation-before.log"
+            exit 1
+          fi
           echo 'Original layout reproduces excess status-bar padding; restoring fix.'
 
       - name: Check navigation layouts and existing widget regressions
