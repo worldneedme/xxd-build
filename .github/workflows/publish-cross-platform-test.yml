@@ -1,0 +1,117 @@
+name: Publish checked Windows and Android test packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_run_id:
+        description: Successful Build WONDERX V1 run ID
+        required: true
+        type: string
+      client_source_sha:
+        description: Full client source SHA used by both packages
+        required: true
+        type: string
+      release_tag:
+        description: New private test release tag
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify private repository and successful build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_RUN_ID: ${{ inputs.build_run_id }}
+          CLIENT_SOURCE_SHA: ${{ inputs.client_source_sha }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          [[ "$BUILD_RUN_ID" =~ ^[0-9]+$ ]]
+          [[ "$CLIENT_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$RELEASE_TAG" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]
+          test "$GITHUB_REPOSITORY" = worldneedme/xxd-build
+          test "$(gh api "repos/$GITHUB_REPOSITORY" --jq .private)" = true
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$BUILD_RUN_ID" > "$RUNNER_TEMP/build-run.json"
+          python3 - "$RUNNER_TEMP/build-run.json" <<'PY'
+          import json, sys
+          run = json.load(open(sys.argv[1], encoding='utf-8'))
+          if run.get('status') != 'completed' or run.get('conclusion') != 'success':
+              raise SystemExit('Source build did not complete successfully')
+          if run.get('path') != '.github/workflows/build-v1.yml':
+              raise SystemExit('Source run is not Build WONDERX V1')
+          PY
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+            echo 'Release tag already exists' >&2
+            exit 1
+          fi
+
+      - name: Download both checked platform artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_RUN_ID: ${{ inputs.build_run_id }}
+        run: |
+          set -euo pipefail
+          gh run download "$BUILD_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name artifact-windows-amd64 --dir packages/windows
+          gh run download "$BUILD_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name artifact-android-arm64-v8a --dir packages/android
+
+      - name: Verify manifests and package checksums
+        env:
+          CLIENT_SOURCE_SHA: ${{ inputs.client_source_sha }}
+          BUILD_RUN_ID: ${{ inputs.build_run_id }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+
+          expected = os.environ['CLIENT_SOURCE_SHA']
+          run_url = f'https://github.com/worldneedme/xxd-build/actions/runs/{os.environ["BUILD_RUN_ID"]}'
+          required = {'windows': {'.exe', '.zip'}, 'android': {'.apk'}}
+          metadata = {}
+          for platform, extensions in required.items():
+              root = Path('packages') / platform
+              manifest = json.loads((root / f'build-metadata-{platform}.json').read_text(encoding='utf-8'))
+              if manifest.get('client_source_sha') != expected or manifest.get('build_run_url') != run_url:
+                  raise SystemExit(f'{platform} source or build run does not match')
+              if manifest.get('platform') != platform or not manifest.get('checks_completed'):
+                  raise SystemExit(f'{platform} check manifest is invalid')
+              recorded = manifest.get('packages') or []
+              if not extensions.issubset({Path(item['filename']).suffix.lower() for item in recorded}):
+                  raise SystemExit(f'{platform} package types are incomplete')
+              for item in recorded:
+                  file = root / item['filename']
+                  if not file.is_file() or file.stat().st_size != item['size_bytes']:
+                      raise SystemExit(f'{platform} package missing or incorrect size: {file.name}')
+                  digest = hashlib.file_digest(file.open('rb'), 'sha256').hexdigest()
+                  if digest != item['sha256']:
+                      raise SystemExit(f'{platform} package checksum differs: {file.name}')
+              metadata[platform] = manifest
+          if metadata['windows']['build_workflow_sha'] != metadata['android']['build_workflow_sha']:
+              raise SystemExit('Windows and Android workflow commits differ')
+          print('Both platform manifests, source SHA and package checksums verified')
+          PY
+
+      - name: Publish private test prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          BUILD_RUN_ID: ${{ inputs.build_run_id }}
+          CLIENT_SOURCE_SHA: ${{ inputs.client_source_sha }}
+        run: |
+          set -euo pipefail
+          gh release create "$RELEASE_TAG" packages/windows/*.exe packages/windows/*.zip \
+            packages/android/*.apk packages/windows/SHA256SUMS-windows.txt \
+            packages/android/SHA256SUMS-android.txt \
+            packages/windows/build-metadata-windows.json \
+            packages/android/build-metadata-android.json \
+            --repo "$GITHUB_REPOSITORY" --target main --prerelease --latest=false \
+            --title "WONDERX V1 Windows and Android private test" \
+            --notes "Private test packages from client $CLIENT_SOURCE_SHA and GitHub Actions run https://github.com/worldneedme/xxd-build/actions/runs/$BUILD_RUN_ID. Windows runner installation and Android package checks were performed. New real subscription end-to-end and user device tests are pending."

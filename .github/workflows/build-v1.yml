@@ -336,6 +336,52 @@ jobs:
           ANDROID_NDK_HOME: ${{ steps.build-ndk.outputs.ndk-path }}
         run: dart setup.dart ${{ matrix.platform }} ${{ env.IS_STABLE == 'true' && '--env stable' || '' }} ${{ matrix.android_arch && format('--arch {0}', matrix.android_arch) || '' }} -v
 
+      - name: Run Android native unit tests
+        if: matrix.platform == 'android'
+        shell: bash
+        working-directory: android
+        env:
+          ANDROID_NDK_HOME: ${{ steps.build-ndk.outputs.ndk-path }}
+        run: |
+          set -euo pipefail
+          test -f ./gradlew
+          bash ./gradlew :common:testDebugUnitTest :service:testDebugUnitTest :app:testDebugUnitTest \
+            -Ptarget-platform=android-arm64 --no-daemon --stacktrace
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+
+          results = []
+          for module in ('common', 'service', 'app'):
+              reports = sorted((Path('../build') / module / 'test-results/testDebugUnitTest').glob('TEST-*.xml'))
+              if not reports:
+                  raise SystemExit(f'No Android unit-test report found for {module}')
+              suites = [ET.parse(report).getroot() for report in reports]
+              tests = sum(int(suite.get('tests', 0)) for suite in suites)
+              skipped = sum(int(suite.get('skipped', 0)) for suite in suites)
+              problems = sum(int(suite.get(key, 0)) for suite in suites for key in ('errors', 'failures'))
+              if tests <= skipped or problems:
+                  raise SystemExit(f'{module} did not run a passing unit-test suite: tests={tests}, skipped={skipped}, failures/errors={problems}')
+              results.append(f'- {module}: {tests - skipped} Android native unit tests passed ({skipped} skipped).')
+          summary = '\n'.join(results)
+          print(summary)
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as output:
+              output.write(f'## Android native unit tests\n\n{summary}\n')
+          PY
+
+      - name: Retain Android unit-test reports
+        if: ${{ always() && matrix.platform == 'android' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-unit-test-reports-${{ github.run_id }}
+          path: |
+            build/common/test-results/testDebugUnitTest/TEST-*.xml
+            build/service/test-results/testDebugUnitTest/TEST-*.xml
+            build/app/test-results/testDebugUnitTest/TEST-*.xml
+          if-no-files-found: warn
+          retention-days: 7
+
       - name: Verify Android native core bridge
         if: matrix.platform == 'android'
         id: android-check
@@ -669,7 +715,7 @@ jobs:
           checks = ['source SHA pinned', 'shared Flutter/Dart/Go/Rust tests passed']
           checks.append('Windows ZIP contents, installer install, app/Core stability and isolated Core JSON-RPC probe passed'
                         if platform == 'windows'
-                        else 'Android ABI, JNI libraries, manifest packaging and signature checks passed')
+                        else 'Android common/service/app native unit tests, ABI, JNI libraries, manifest packaging and signature checks passed')
           metadata = {
               'client_source_sha': os.environ['CLIENT_SOURCE_SHA'],
               'panel_source_sha': os.environ['PANEL_SOURCE_SHA'],
