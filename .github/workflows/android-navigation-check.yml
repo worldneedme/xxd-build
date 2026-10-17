@@ -1,0 +1,78 @@
+name: Android navigation layout regression
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Exact client commit with navigation regression tests
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  layout:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout fixed client
+        uses: actions/checkout@v4
+        with:
+          repository: worldneedme/xxdmanfl0609
+          ref: ${{ inputs.source_ref }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          persist-credentials: false
+          fetch-depth: 5
+
+      - name: Check source identity
+        env:
+          SOURCE_REF: ${{ inputs.source_ref }}
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_REF" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$SOURCE_REF"
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.47.1'
+          cache: true
+
+      - name: Install dependencies and disable native hooks for widget tests
+        run: |
+          flutter pub get
+          yq -i '.hooks.user_defines.setup.build_assets = false | .hooks.user_defines.rust_api.build_assets = false' pubspec.yaml
+
+      - name: Analyze
+        run: flutter analyze --no-fatal-infos
+
+      - name: Verify regression catches the original Android inset bug
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp lib/pages/home.dart "$RUNNER_TEMP/fixed-home.dart"
+          trap 'cp "$RUNNER_TEMP/fixed-home.dart" lib/pages/home.dart' EXIT
+          git show ad4a860b80b85f9403bc65125aea768f1ffcdd47:lib/pages/home.dart > lib/pages/home.dart
+          set +e
+          flutter test test/pages/home_navigation_insets_test.dart --reporter expanded > "$RUNNER_TEMP/navigation-before.log" 2>&1
+          status=$?
+          set -e
+          if test "$status" = 0; then
+            echo 'Regression suite unexpectedly passed on the unfixed layout'
+            exit 1
+          fi
+          grep -F 'Expected: <80.0>' "$RUNNER_TEMP/navigation-before.log"
+          grep -E 'Actual: <(104|128)\.0>' "$RUNNER_TEMP/navigation-before.log"
+          echo 'Original layout reproduces excess status-bar padding; restoring fix.'
+
+      - name: Check navigation layouts and existing widget regressions
+        run: flutter test test/pages/ test/widgets/ --reporter expanded
+
+      - name: Record checked source
+        env:
+          SOURCE_REF: ${{ inputs.source_ref }}
+        run: |
+          printf 'Navigation layout regression passed on client %s\n' "$SOURCE_REF" >> "$GITHUB_STEP_SUMMARY"
+          printf 'Original code fails the new height regression; fixed code passes page/widget tests. Device testing remains pending.\n' >> "$GITHUB_STEP_SUMMARY"
