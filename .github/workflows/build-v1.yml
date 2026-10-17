@@ -197,10 +197,34 @@ jobs:
       - name: Run Windows service tests
         run: cargo test --manifest-path services/helper/Cargo.toml --features windows-service
 
+  stage-release:
+    name: Stage private package release
+    needs: [test, windows-helper-test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Create draft release for checked packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          gh release create "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target main \
+            --draft \
+            --prerelease \
+            --latest=false \
+            --title "WONDERX V1 checked packages $RELEASE_TAG" \
+            --notes "Staging release. It is published only after both platform checks and checksum verification pass."
+
   build:
     name: Build ${{ matrix.platform }} ${{ matrix.arch }}
-    needs: [test, windows-helper-test]
+    needs: [test, windows-helper-test, stage-release]
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
     env:
       IS_STABLE: ${{ !contains(inputs.release_tag, '-') }}
       CLIENT_SOURCE_SHA: ${{ inputs.source_ref }}
@@ -730,11 +754,16 @@ jobs:
           print(f'Wrote {output.name} with {len(packages)} checked package file(s)')
           PY
 
-      - name: Save checked platform package cache
-        uses: actions/cache/save@v4
-        with:
-          path: ./dist
-          key: xxd-build-dist-${{ github.run_id }}-${{ matrix.platform }}-${{ matrix.arch }}
+      - name: Upload checked platform packages to draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          test -d ./dist
+          compgen -G './dist/*' >/dev/null
+          gh release upload "$RELEASE_TAG" ./dist/* --repo "$GITHUB_REPOSITORY"
 
   release:
     name: Publish complete private prerelease
@@ -838,19 +867,15 @@ jobs:
           print('Exact client SHA, fixed-port baseline, three hop rounds and cleanup evidence passed')
           PY
 
-      - name: Restore checked Windows package cache
-        uses: actions/cache/restore@v4
-        with:
-          path: ./release-staging
-          key: xxd-build-dist-${{ github.run_id }}-windows-amd64
-          fail-on-cache-miss: true
-
-      - name: Restore checked Android package cache
-        uses: actions/cache/restore@v4
-        with:
-          path: ./release-staging
-          key: xxd-build-dist-${{ github.run_id }}-android-arm64-v8a
-          fail-on-cache-miss: true
+      - name: Download checked packages from draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p ./release-staging
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir ./release-staging
 
       - name: Build combined manifest and release notes
         shell: bash
@@ -942,31 +967,26 @@ jobs:
             printf '\nThe release is hosted in the private `worldneedme/xxd-build` repository. Android packages signed with the debug key use the `.dev` application ID and cannot replace an existing production install.\n'
           } > release.md
 
-      - name: Recheck tag absence before publishing
+      - name: Verify staged draft release before publishing
         shell: bash
         env:
           RELEASE_TAG: ${{ inputs.release_tag }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          for endpoint in releases/tags git/ref/tags; do
-            status=$(curl -sS -o /dev/null -w '%{http_code}' \
-              -H "Authorization: Bearer $GH_TOKEN" \
-              "https://api.github.com/repos/worldneedme/xxd-build/$endpoint/$RELEASE_TAG")
-            [[ "$status" == 404 ]] || { echo "Refusing to overwrite an existing release/tag (HTTP $status)" >&2; exit 1; }
-          done
+          draft=$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)
+          [[ "$draft" == true ]] || { echo 'The staged package release is not a draft.' >&2; exit 1; }
 
       - name: Publish private prerelease after all gates
-        uses: softprops/action-gh-release@v2
-        with:
-          name: WONDERX V1 Juicity compatibility ${{ inputs.release_tag }}
-          repository: worldneedme/xxd-build
-          token: ${{ github.token }}
-          tag_name: ${{ inputs.release_tag }}
-          target_commitish: main
-          body_path: release.md
-          prerelease: true
-          make_latest: false
-          files: |
-            ./release-staging/*
-          fail_on_unmatched_files: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          gh release upload "$RELEASE_TAG" \
+            release-staging/manifest.json release-staging/SHA256SUMS.txt \
+            --repo "$GITHUB_REPOSITORY" --clobber
+          gh release edit "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" --draft=false --prerelease --latest=false \
+            --title "WONDERX V1 Juicity compatibility $RELEASE_TAG" \
+            --notes-file release.md

@@ -51,19 +51,25 @@ jobs:
             exit 1
           fi
 
-      - name: Restore checked Windows package cache
-        uses: actions/cache/restore@v4
-        with:
-          path: packages/windows
-          key: xxd-build-dist-${{ inputs.build_run_id }}-windows-amd64
-          fail-on-cache-miss: true
+      - name: Download checked Windows packages from draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p packages/windows
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --dir packages/windows --pattern '*windows*'
 
-      - name: Restore checked Android package cache
-        uses: actions/cache/restore@v4
-        with:
-          path: packages/android
-          key: xxd-build-dist-${{ inputs.build_run_id }}-android-arm64-v8a
-          fail-on-cache-miss: true
+      - name: Download checked Android packages from draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p packages/android
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --dir packages/android --pattern '*android*'
 
       - name: Verify manifests and package checksums
         env:
@@ -110,11 +116,14 @@ jobs:
           CLIENT_SOURCE_SHA: ${{ inputs.client_source_sha }}
         run: |
           set -euo pipefail
-          gh release create "$RELEASE_TAG" packages/windows/*.exe packages/windows/*.zip \
-            packages/android/*.apk packages/windows/SHA256SUMS-windows.txt \
-            packages/android/SHA256SUMS-android.txt \
-            packages/windows/build-metadata-windows.json \
-            packages/android/build-metadata-android.json \
-            --repo "$GITHUB_REPOSITORY" --target main --prerelease --latest=false \
+          draft=$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)
+          [[ "$draft" == true ]] || { echo 'The staged package release is not a draft.' >&2; exit 1; }
+          gh release upload "$RELEASE_TAG" \
+            packages/windows/*.exe packages/windows/*.zip packages/android/*.apk \
+            packages/windows/SHA256SUMS-windows.txt packages/android/SHA256SUMS-android.txt \
+            packages/windows/build-metadata-windows.json packages/android/build-metadata-android.json \
+            --repo "$GITHUB_REPOSITORY" --clobber
+          gh release edit "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" --draft=false --prerelease --latest=false \
             --title "WONDERX V1 Windows and Android private test" \
             --notes "Private test packages from client $CLIENT_SOURCE_SHA and GitHub Actions run https://github.com/worldneedme/xxd-build/actions/runs/$BUILD_RUN_ID. Windows runner installation and Android package checks were performed. New real subscription end-to-end and user device tests are pending."
