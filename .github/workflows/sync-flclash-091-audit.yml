@@ -1,0 +1,90 @@
+name: Audit FlClash 0.9.1 sync
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Full private client commit to audit
+        required: true
+        type: string
+      upstream_tag:
+        description: Official FlClash release tag
+        required: true
+        default: v0.9.1
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  merge-audit:
+    name: Compute non-destructive sync audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout private client source
+        uses: actions/checkout@v4
+        with:
+          repository: worldneedme/xxdmanfl0609
+          ref: ${{ inputs.source_ref }}
+          fetch-depth: 0
+          filter: blob:none
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          persist-credentials: false
+
+      - name: Verify source ref and compute merge audit
+        shell: bash
+        env:
+          SOURCE_REF: ${{ inputs.source_ref }}
+          UPSTREAM_TAG: ${{ inputs.upstream_tag }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$SOURCE_REF" =~ ^[0-9a-f]{40}$ ]] || { echo 'source_ref must be a full commit SHA' >&2; exit 1; }
+          [[ "$UPSTREAM_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'upstream_tag must be a release tag' >&2; exit 1; }
+          test "$(git rev-parse HEAD)" = "$SOURCE_REF"
+          git remote add flclash-upstream https://github.com/chen08209/FlClash.git
+          git fetch --no-tags --filter=blob:none flclash-upstream "refs/tags/$UPSTREAM_TAG:refs/remotes/flclash-upstream/$UPSTREAM_TAG"
+          upstream_ref="refs/remotes/flclash-upstream/$UPSTREAM_TAG"
+          upstream_sha="$(git rev-parse "$upstream_ref")"
+          merge_base="$(git merge-base "$SOURCE_REF" "$upstream_ref" || true)"
+          source_count="$(git ls-tree -r --name-only "$SOURCE_REF" | wc -l | tr -d ' ')"
+          upstream_count="$(git ls-tree -r --name-only "$upstream_ref" | wc -l | tr -d ' ')"
+          custom_paths=(
+            'core/Clash.Meta/adapter/outbound/helper_proxy.go'
+            'core/Clash.Meta/adapter/outbound/juicity_native.go'
+            'core/Clash.Meta/adapter/outbound/juicity_hop.go'
+            'core/Clash.Meta/adapter/outbound/mieru.go'
+            'core/Clash.Meta/transport/sudoku/obfs/httpmask_tunnel.go'
+            'services/helper/Cargo.toml'
+            'plugins/rust_api/rust/Cargo.toml'
+          )
+          custom_count=0
+          for path in "${custom_paths[@]}"; do
+            if git cat-file -e "$SOURCE_REF:$path" 2>/dev/null; then
+              custom_count=$((custom_count + 1))
+            fi
+          done
+          set +e
+          git merge --no-commit --no-ff "$upstream_ref" >"$RUNNER_TEMP/merge.log" 2>&1
+          merge_status=$?
+          set -e
+          git diff --name-only --diff-filter=U >"$RUNNER_TEMP/conflicts.txt" || true
+          conflict_count="$(wc -l <"$RUNNER_TEMP/conflicts.txt" | tr -d ' ')"
+          {
+            echo '### FlClash 0.9.1 sync audit'
+            echo
+            echo "- Source commit: $SOURCE_REF"
+            echo "- Upstream: $UPSTREAM_TAG ($upstream_sha)"
+            echo "- Merge base: ${merge_base:-none}"
+            echo "- Merge status: $merge_status"
+            echo "- Conflict paths: $conflict_count"
+            echo "- File entries: $source_count source / $upstream_count upstream"
+            echo "- Preserved custom protocol/build paths present: $custom_count / ${#custom_paths[@]}"
+            echo
+            echo 'Conflict paths (names only):'
+            sed 's/^/- /' "$RUNNER_TEMP/conflicts.txt"
+            echo
+            echo 'No private source contents, code, or diff bodies were printed or uploaded.'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "Audit completed: status=$merge_status conflicts=$conflict_count"
+
