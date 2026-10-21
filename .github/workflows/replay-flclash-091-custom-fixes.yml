@@ -32,7 +32,6 @@ jobs:
           repository: worldneedme/xxdmanfl0609
           ref: ${{ inputs.source_ref }}
           fetch-depth: 0
-          filter: blob:none
           ssh-key: ${{ secrets.SOURCE_READ_KEY }}
           persist-credentials: false
 
