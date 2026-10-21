@@ -1,0 +1,97 @@
+name: Materialize WONDERX official 0.9.1
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        required: true
+        type: string
+      target_branch:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: worldneedme/xxdmanfl0609
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          ssh-key: ${{ secrets.SOURCE_WRITE_KEY }}
+          persist-credentials: true
+      - name: Compose private source
+        env:
+          WONDERX_SOURCE_SHA: ${{ inputs.source_sha }}
+          TARGET_BRANCH: ${{ inputs.target_branch }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$WONDERX_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$TARGET_BRANCH" = codex/flclash-0.9.1-complete-20261021
+          test "$(git rev-parse HEAD)" = "$WONDERX_SOURCE_SHA"
+          cp tool/wonderx_091_finalize.py "$RUNNER_TEMP/finalize.py"
+          if ! bash tool/wonderx_091_compose.sh >"$RUNNER_TEMP/compose.log" 2>&1; then
+            tail -n 1 "$RUNNER_TEMP/compose.log"
+            exit 1
+          fi
+          test "$(git rev-parse refs/tags/wonderx-v091^{commit})" = 8d4f9744948751f1273fe871e1d05276fac09b0e
+          if ! python3 "$RUNNER_TEMP/finalize.py" >"$RUNNER_TEMP/finalize.log" 2>&1; then
+            tail -n 1 "$RUNNER_TEMP/finalize.log"
+            exit 1
+          fi
+          git restore --source="$WONDERX_SOURCE_SHA" --staged --worktree -- \
+            tool/wonderx_091_finalize.py test/wonderx_091_behaviour_test.dart
+          yq -i '.hooks.user_defines.setup.build_assets = false | .hooks.user_defines.rust_api.build_assets = false' pubspec.yaml
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.1'
+          cache-dependency-path: |
+            core/go.sum
+            core/Clash.Meta/go.sum
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.47.7'
+          cache: true
+      - name: Resolve dependencies and regenerate models
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          flutter pub get >"$RUNNER_TEMP/pub.log" 2>&1 || { tail -n 3 "$RUNNER_TEMP/pub.log"; exit 1; }
+          dart run build_runner build --delete-conflicting-outputs >"$RUNNER_TEMP/codegen.log" 2>&1 || {
+            tail -n 5 "$RUNNER_TEMP/codegen.log"; exit 1;
+          }
+          (cd core && go mod tidy) >"$RUNNER_TEMP/tidy.log" 2>&1 || { tail -n 5 "$RUNNER_TEMP/tidy.log"; exit 1; }
+          yq -i '.hooks.user_defines.setup.build_assets = true | .hooks.user_defines.rust_api.build_assets = true' pubspec.yaml
+          dart format lib test tool plugins setup.dart >"$RUNNER_TEMP/format.log" 2>&1 || { tail -n 3 "$RUNNER_TEMP/format.log"; exit 1; }
+          gofmt -w core/connection.go core/delay.go core/lib.go core/lifecycle.go core/tun/tun.go
+      - name: Commit complete candidate
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          TARGET_BRANCH: ${{ inputs.target_branch }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)" = "$SOURCE_SHA"
+          git add -u
+          git add lib/views/dashboard/widgets/current_node_name.dart \
+            test/widgets/current_node_name_test.dart test/widgets/current_node_runtime_test.dart \
+            test/wonderx_091_behaviour_test.dart tool/wonderx_091_finalize.py HANDOVER.md
+          git diff --cached --check >"$RUNNER_TEMP/diff-check.log" 2>&1 || {
+            echo 'Whitespace gate failed'; exit 1;
+          }
+          git config user.name 'worldneedme'
+          git config user.email '32259095+worldneedme@users.noreply.github.com'
+          tree="$(git write-tree)"
+          commit="$(git commit-tree "$tree" -p "$SOURCE_SHA" -p 8d4f9744948751f1273fe871e1d05276fac09b0e \
+            -m 'feat: integrate official FlClash 0.9.1 with V1 protocols and behavior')"
+          git push origin "$commit:refs/heads/$TARGET_BRANCH"
+          {
+            echo '### Materialized candidate'
+            echo "- Client source SHA: $commit"
+            echo '- Official SHA: 8d4f9744948751f1273fe871e1d05276fac09b0e'
+            echo '- Models regenerated; dependency locks resolved; candidate awaiting full checks.'
+          } >> "$GITHUB_STEP_SUMMARY"
