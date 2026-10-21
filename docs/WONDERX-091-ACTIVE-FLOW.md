@@ -72,3 +72,8 @@ Normalization 39659152638 PASSED; final generated source baaacf5d0d24990fe6e7b4e
 Full five-round regression + paired package run: https://github.com/worldneedme/xxd-build/actions/runs/39659572718 — RUNNING.
 Workflow run HEAD94ece9c2899817d7cc14ac1dead452512144f5c1; functional workflow3c395b9e449bac1995956bbe2aacf38995f57652.
 Intended tag: wonderx-v1-0.9.1-consumer-ui-direct-start-20261021-1913 (NOT YET DELIVERED).
+
+Full run39659572718 FAILED in Flutter round1 (4300 passed,4 failed,6 skipped); native PASSED.
+Failures: optional legal page test, V1 header drag test, optional connections table sort/resize tests.
+Packaging/publish SKIPPED. Expanded focused diagnostics run39660700593; source unchanged baaacf5d.
+Do not count failed round as completed regression. Next: use actual exception details, repair minimal setup/behavior, normalize if source changes, restart all five rounds.
