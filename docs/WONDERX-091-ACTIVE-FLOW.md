@@ -22,7 +22,9 @@ All runs use GitHub-hosted runners; no local build/test/dependency/artifact acti
 
 ## Current stages
 Implementation: candidate committed.
-Hosted generation: NOT_STARTED.
+Hosted generation: RUNNING — https://github.com/worldneedme/xxd-build/actions/runs/39655732620.
+Temporary source writer deploy key: 167221912 (remove after hosted generation/delivery).
+Earlier normalization 39655618408 was cancelled before generation to include the inline footer argument correction.
 Five-round regression: NOT_STARTED.
 Paired packaging and publish: NOT_STARTED.
 PRIVATE restoration and temporary-key cleanup: required after delivery.
