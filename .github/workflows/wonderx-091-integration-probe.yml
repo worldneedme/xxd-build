@@ -56,7 +56,7 @@ jobs:
             case "$path" in
               core/Clash.Meta~*)
                 git rm -f --cached --ignore-unmatch -- "$path"
-                rm -f -- "$path"
+                rm -rf -- "$path"
                 ;;
               *)
                 if git cat-file -e "HEAD:$path" 2>/dev/null; then
@@ -64,7 +64,7 @@ jobs:
                   git add -- "$path"
                 else
                   git rm -f --cached --ignore-unmatch -- "$path"
-                  rm -f -- "$path"
+                  rm -rf -- "$path"
                 fi
                 ;;
             esac
@@ -72,11 +72,11 @@ jobs:
           test -z "$(git ls-files -u)"
           git restore --source=HEAD --staged --worktree -- assets/images/icon.png assets/images/icon.ico
           git restore --source=HEAD --staged --worktree -- core/Clash.Meta
-          test "$(git rev-parse :core/Clash.Meta)" = "$original_core_tree" || {
+          test "$(git rev-parse "$(git write-tree):core/Clash.Meta")" = "$original_core_tree" || {
             echo "Private custom core was modified"; exit 1;
           }
-          test "$(git rev-parse :assets/images/icon.png)" = "$original_icon_sha"
-          test "$(git rev-parse :assets/images/icon.ico)" = "$original_ico_sha"
+          test "$(git rev-parse "$(git write-tree):assets/images/icon.png")" = "$original_icon_sha"
+          test "$(git rev-parse "$(git write-tree):assets/images/icon.ico")" = "$original_ico_sha"
           git diff --cached --shortstat
           git commit -m "test: merge upstream FlClash 0.9.1 preserving WONDERX core and icons" >/dev/null
           test "$(git rev-parse HEAD:core/Clash.Meta)" = "$original_core_tree"
