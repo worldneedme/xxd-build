@@ -1,0 +1,66 @@
+name: Preview FlClash 0.9.1 merge
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        required: true
+        type: string
+      upstream_tag:
+        required: true
+        default: v0.9.1
+        type: string
+permissions:
+  contents: read
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: worldneedme/xxdmanfl0609
+          ref: ${{ inputs.source_ref }}
+          fetch-depth: 0
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          persist-credentials: false
+      - name: Preview custom-preserving merge
+        shell: bash
+        env:
+          SOURCE_REF: ${{ inputs.source_ref }}
+          UPSTREAM_TAG: ${{ inputs.upstream_tag }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$SOURCE_REF" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$UPSTREAM_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test "$(git rev-parse HEAD)" = "$SOURCE_REF"
+          git remote add upstream https://github.com/chen08209/FlClash.git
+          git fetch --no-tags upstream "+refs/tags/$UPSTREAM_TAG:refs/tags/preview-upstream"
+          ref=refs/tags/preview-upstream
+          git config user.name 'GitHub Audit'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          set +e
+          git merge --no-commit --no-ff -X ours "$ref" >"$RUNNER_TEMP/merge.log" 2>&1
+          status=$?
+          set -e
+          git diff --name-only --diff-filter=U >"$RUNNER_TEMP/conflicts.txt"
+          count="$(wc -l <"$RUNNER_TEMP/conflicts.txt" | tr -d ' ')"
+          {
+            echo '### Disposable merge preview'
+            echo "- Source: $SOURCE_REF"
+            echo "- Upstream: $(git rev-parse "${ref}^{commit}")"
+            echo "- Merge status: $status"
+            echo "- Remaining conflicts: $count"
+            echo 'Unmerged index metadata:'
+            git ls-files -u
+            echo 'Staged paths summary:'
+            git diff --cached --shortstat
+            echo 'Custom core before merge:'
+            git ls-tree "$SOURCE_REF" core/Clash.Meta
+            echo 'Upstream core:'
+            git ls-tree "$ref" core/Clash.Meta
+            echo 'No private source contents or patches uploaded.'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          if (( status > 1 )) || { (( status == 1 )) && (( count == 0 )); }; then
+            echo 'Unexpected merge failure' >&2
+            exit 1
+          fi
