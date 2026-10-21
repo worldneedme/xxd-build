@@ -18,10 +18,50 @@ if ($preexisting.Count -gt 0) {
   throw 'A same-named FlClash process already exists on the runner; refusing an installer whose hook terminates by image name.'
 }
 
+$desktopRoots = @(
+  [Environment]::GetFolderPath([Environment+SpecialFolder]::CommonDesktopDirectory)
+  [Environment]::GetFolderPath([Environment+SpecialFolder]::DesktopDirectory)
+) | Select-Object -Unique
+foreach ($desktopRoot in $desktopRoots) {
+  foreach ($name in @('V1.lnk', 'WONDERX V1.lnk')) {
+    if (Test-Path -LiteralPath (Join-Path $desktopRoot $name)) {
+      throw 'A branded desktop shortcut already exists; refusing to overwrite it during smoke testing.'
+    }
+  }
+}
+$shell = New-Object -ComObject WScript.Shell
+$commonDesktop = [Environment]::GetFolderPath([Environment+SpecialFolder]::CommonDesktopDirectory)
+$legacyDesktopShortcut = Join-Path $commonDesktop 'WONDERX V1.lnk'
+$legacyShortcut = $shell.CreateShortcut($legacyDesktopShortcut)
+$legacyShortcut.TargetPath = Join-Path $installRoot 'FlClash.exe'
+$legacyShortcut.Save()
+
 $install = Start-Process -FilePath $setup.FullName -Wait -PassThru -WindowStyle Hidden -ArgumentList @(
-  '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', "/DIR=$installRoot"
+  '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', '/TASKS=desktopicon', "/DIR=$installRoot"
 )
 if ($install.ExitCode -ne 0) { throw "Inno Setup installer failed with exit code $($install.ExitCode)." }
+
+
+$desktopShortcut = Join-Path $commonDesktop 'V1.lnk'
+if (-not (Test-Path -LiteralPath $desktopShortcut -PathType Leaf)) {
+  throw 'Installer did not create the requested V1 desktop shortcut.'
+}
+$shortcut = $shell.CreateShortcut($desktopShortcut)
+if (-not [String]::Equals($shortcut.TargetPath, (Join-Path $installRoot 'FlClash.exe'), [StringComparison]::OrdinalIgnoreCase)) {
+  throw 'The V1 desktop shortcut does not target this installation.'
+}
+if (Test-Path -LiteralPath $legacyDesktopShortcut) {
+  throw 'Installer left the legacy desktop shortcut that targeted this same installation.'
+}
+$uninstallEntries = @(Get-ChildItem 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall' |
+  Get-ItemProperty | Where-Object {
+    $_.InstallLocation -and
+    [String]::Equals($_.InstallLocation.TrimEnd('\'), $installRoot.TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase)
+  })
+if ($uninstallEntries.Count -ne 1 -or $uninstallEntries[0].DisplayName -ne 'WONDERX V1') {
+  throw 'Installed Apps must show WONDERX V1 for this exact installation.'
+}
+Write-Host 'Installer branding passed: WONDERX V1 display name, V1 desktop shortcut and scoped legacy shortcut cleanup.'
 
 $requiredFiles = @(
   'FlClash.exe', 'FlClashCore.exe', 'FlClashHelperService.exe', 'manifest.json', 'unins000.exe',

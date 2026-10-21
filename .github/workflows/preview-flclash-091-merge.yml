@@ -142,7 +142,8 @@ jobs:
           set -euo pipefail
           yq -i '.hooks.user_defines.setup.build_assets = false' pubspec.yaml
           if ! flutter test test/views/disclaimer_test.dart test/manager/window_header_test.dart test/views/dashboard/connections_table_test.dart --reporter expanded > "$RUNNER_TEMP/focused-test.log" 2>&1; then
-            tail -n 220 "$RUNNER_TEMP/focused-test.log"
+            grep -m 4 -A 24 'EXCEPTION CAUGHT' "$RUNNER_TEMP/focused-test.log" || true
+            tail -n 160 "$RUNNER_TEMP/focused-test.log"
             exit 1
           fi
           tail -n 3 "$RUNNER_TEMP/focused-test.log"
@@ -434,6 +435,8 @@ jobs:
           checks = json.loads((dist / 'PACKAGE-CHECKS.json').read_text())
           if platform == 'windows':
               checks['actual_install_start_and_core_rpc'] = 'PASSED'
+              checks['installer_wonderx_v1_and_desktop_shortcut_v1'] = 'PASSED'
+              checks['scoped_legacy_desktop_shortcut_upgrade'] = 'PASSED'
               checks['fresh_start_without_disclaimer_acceptance'] = 'PASSED'
               checks['user_device_test'] = 'PENDING_DEVICE_TEST'
           elif (dist / 'APK-SIGNATURES.txt').exists():
@@ -515,6 +518,7 @@ jobs:
             echo "Validation and build: https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
             echo
             echo 'Official 0.9.1 UI/platform base; WONDERX V1 identity and Mieru/Juicity-Hopping/NaiveProxy/Sudoku retained.'
+            echo 'Windows installer and Installed Apps display WONDERX V1; the default desktop shortcut is V1. App identity and existing data location retained.'
             echo 'V1 tray logo, simplified dashboard, aligned node name/runtime, gold expanded-sidebar motto, V1 window header.'
             echo 'The former organization slot now reminds users to keep subscriptions updated; all seven locales are included.'
             echo 'First launch enters the app directly: mandatory disclaimer and typed-restatement screens removed. Read-only legal information remains in Tools; OS VPN permissions remain.'

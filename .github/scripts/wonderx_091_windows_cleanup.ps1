@@ -36,3 +36,19 @@ if (Test-Path -LiteralPath $installRoot) {
   }
   if (Test-Path -LiteralPath $installRoot) { Remove-Item -LiteralPath $installRoot -Recurse -Force }
 }
+
+$shell = New-Object -ComObject WScript.Shell
+foreach ($desktopRoot in @(
+  [Environment]::GetFolderPath([Environment+SpecialFolder]::CommonDesktopDirectory)
+  [Environment]::GetFolderPath([Environment+SpecialFolder]::DesktopDirectory)
+) | Select-Object -Unique) {
+  foreach ($name in @('V1.lnk', 'WONDERX V1.lnk')) {
+    $linkPath = Join-Path $desktopRoot $name
+    if (Test-Path -LiteralPath $linkPath -PathType Leaf) {
+      $shortcut = $shell.CreateShortcut($linkPath)
+      if ([String]::Equals($shortcut.TargetPath, (Join-Path $installRoot 'FlClash.exe'), [StringComparison]::OrdinalIgnoreCase)) {
+        Remove-Item -LiteralPath $linkPath
+      }
+    }
+  }
+}
