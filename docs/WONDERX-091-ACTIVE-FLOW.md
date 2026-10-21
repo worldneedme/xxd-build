@@ -76,3 +76,9 @@ Go 包装层 go test . 失败，日志展示需定位具体断言，未跳过或
 - 39622054524 / native job 119297898985：PASSED，15:03:59 UTC 完成。
 - Go wrapper -count=5、desktop/Android vet、自定义 parser/adapter/Juicity Hop/Sudoku、Rust 两组件全部成功；runner 标签 ubuntu-latest（GitHub 托管）。
 - Flutter 五轮仍 RUNNING；平台打包/发布 NOT_STARTED。仅 native 成功不计完整验收或可交付。
+
+## 15:50 UTC Android CI 环境修复
+- 39622054524：Windows job 119306219891 已成功；Android job 119306219844 在“Android JVM lifecycle regressions”失败。
+- 失败不是应用测试断言：JVM Gradle 步骤未继承 setup-ndk 的 r28c 路径，Flutter native-assets hook 回退到系统 NDK 27.3，报 No libclang。
+- 最小修复已提交到公开构建仓库 workflow：ed1a3880e6c7cb61dcabf177a343dce82b671e0a；为 Android JVM 步骤传入 setup-ndk 输出的 ANDROID_NDK_HOME/ROOT。源码 SHA 不变，未放宽检查。
+- 旧运行不计交付；需用同一源码 c34637e714bbf3bdd429043de4f69d4ac18b8b2b 重新完成五轮门禁、两平台检查和成对发布。
