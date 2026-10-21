@@ -90,3 +90,9 @@ Normalization run39661357336 RUNNING; not yet delivered.
 Workflow942099f26444565d2e6ea3c663bebd872ba1809d adds actual registry/V1.lnk/legacy-cleanup checks and scoped smoke cleanup.
 Previous diagnostic39660700593 FAILED; native passed; package jobs skipped.
 No production changes; source PRIVATE; build temporarily PUBLIC until delivery/cleanup.
+
+Normalization39661357336 PASSED. Generated final candidate0b6781447ed133ac9967cacc52bd628001fb4c51.
+Five-round unified run https://github.com/worldneedme/xxd-build/actions/runs/39661857289 RUNNING (2026-10-21T19:27:53Z).
+Workflow run SHAa93b2f951f99c723a43f7d9edcd2d049e103cb84, functional942099f26444565d2e6ea3c663bebd872ba1809d.
+Tagwonderx-v1-0.9.1-consumer-ui-v1-installer-20261021-1928 intended, not published yet.
+Next: focused regression→five full rounds→paired Windows/Android checks→release→writer revocation/PRIVATE restoration.
