@@ -103,7 +103,29 @@ jobs:
           set -euo pipefail
           yq -i '.hooks.user_defines.setup.build_assets = false' pubspec.yaml
           if ! dart run tool/test.dart > "$RUNNER_TEMP/flutter-test.log" 2>&1; then
-            grep -E '(\[E\]|Expected:|Actual:|Error:|error:|Some tests failed|Failed to load|Test failed|TestFailure)' "$RUNNER_TEMP/flutter-test.log" | tail -n 70 || true
+            python3 - <<'PY'
+          import json
+          from pathlib import Path
+          report = Path('.dart_tool/test_bundles/report.json')
+          tests, errors, failed = {}, {}, set()
+          if report.exists():
+              for line in report.read_text().splitlines():
+                  if not line.startswith('{'):
+                      continue
+                  event = json.loads(line)
+                  kind = event.get('type')
+                  if kind == 'testStart':
+                      tests[event['test']['id']] = event['test']['name']
+                  elif kind == 'error':
+                      errors.setdefault(event['testID'], []).append(event.get('error', ''))
+                  elif kind == 'testDone' and event.get('result') != 'success' and not event.get('skipped'):
+                      failed.add(event['testID'])
+          for test_id in sorted(failed):
+              print('FAILED_TEST:', tests.get(test_id, str(test_id)))
+              for error in errors.get(test_id, []):
+                  print('\n'.join(error.splitlines()[:24])[:2400])
+          PY
+            grep -E '(\[E\]|file\(s\) failed|^  test/|tests passed|Some tests failed)' "$RUNNER_TEMP/flutter-test.log" | tail -n 35 || true
             exit 1
           fi
           tail -n 3 "$RUNNER_TEMP/flutter-test.log"
