@@ -55,3 +55,15 @@ Its temporary writer 167136428 was removed and build PRIVATE restored after that
 ## Important limitation
 Android original signing secrets are absent: retain existing .dev test signing.
 Do not promise overwrite compatibility or actual user-device connectivity from CI.
+
+
+## 2026-10-21 19:09 UTC — concise multilingual subscription reminder
+User superseded the long reminder with concise, warmer text: 订阅常更新 / 连接更顺心.
+Seven source ARB locales updated. Runtime retained; former organization slot is static reminder only.
+Source patch: d2671dff4e4fbc1c7a2c964555341562e5711102.
+Workflow: 3c395b9e449bac1995956bbe2aacf38995f57652 (adds hosted intl_utils generation).
+Normalization run: https://github.com/worldneedme/xxd-build/actions/runs/39659152638 — RUNNING.
+Previous run 39658285587 FAILED static analysis: obsolete mandatory-consent tests and missing config import.
+Those tests now cover read-only legal navigation/scrolling/back on desktop, phone and remote; unrelated dialogs retained.
+Five full successful final-source rounds and packages remain NOT_STARTED; no new release delivered yet.
+Temporary writer/secret cleanup and xxd-build PRIVATE restoration remain mandatory at completion.
