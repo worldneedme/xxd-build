@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 80
     env:
-      SOURCE_SHA: 'a3df178f3c923e5d044fb6a17089debe795af4f0'
+      SOURCE_SHA: 'a6588c1806b7a84581f4f1c1d8f02139b827c704'
       UPSTREAM_TAG: v0.9.1
     steps:
       - name: Checkout private source commit
@@ -99,7 +99,7 @@ jobs:
             os: windows-2022
             arch: amd64
     env:
-      SOURCE_SHA: 'a3df178f3c923e5d044fb6a17089debe795af4f0'
+      SOURCE_SHA: 'a6588c1806b7a84581f4f1c1d8f02139b827c704'
       NAIVE_VERSION: 'v154.0.8037.49-3'
       NAIVE_APK_SHA256: 'c65ecdd032a05d85884eed03e231b23c6feff6b59b1e7de7aa1591ba7d692f0a'
     steps:
