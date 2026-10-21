@@ -1,5 +1,8 @@
 name: Materialize WONDERX official 0.9.1
 on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/materialize-v1-091.yml]
   workflow_dispatch:
     inputs:
       source_sha:
@@ -12,6 +15,7 @@ permissions:
   contents: read
 jobs:
   materialize:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
