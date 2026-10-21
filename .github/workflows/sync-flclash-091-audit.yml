@@ -42,13 +42,19 @@ jobs:
           [[ "$SOURCE_REF" =~ ^[0-9a-f]{40}$ ]] || { echo 'source_ref must be a full commit SHA' >&2; exit 1; }
           [[ "$UPSTREAM_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'upstream_tag must be a release tag' >&2; exit 1; }
           test "$(git rev-parse HEAD)" = "$SOURCE_REF"
+
           git remote add flclash-upstream https://github.com/chen08209/FlClash.git
-          git fetch --no-tags --filter=blob:none flclash-upstream "refs/tags/$UPSTREAM_TAG:refs/remotes/flclash-upstream/$UPSTREAM_TAG"
-          upstream_ref="refs/remotes/flclash-upstream/$UPSTREAM_TAG"
-          upstream_sha="$(git rev-parse "$upstream_ref")"
-          merge_base="$(git merge-base "$SOURCE_REF" "$upstream_ref" || true)"
+          git fetch --no-tags --filter=blob:none flclash-upstream \
+            "+refs/tags/$UPSTREAM_TAG:refs/tags/audit-upstream-$UPSTREAM_TAG"
+          upstream_ref="refs/tags/audit-upstream-$UPSTREAM_TAG"
+          upstream_sha="$(git rev-parse "${upstream_ref}^{commit}")"
+          merge_base="$(git merge-base "$SOURCE_REF" "$upstream_ref")" || {
+            echo 'No common ancestor found; refusing to report an invalid merge audit as success.' >&2
+            exit 1
+          }
           source_count="$(git ls-tree -r --name-only "$SOURCE_REF" | wc -l | tr -d ' ')"
           upstream_count="$(git ls-tree -r --name-only "$upstream_ref" | wc -l | tr -d ' ')"
+
           custom_paths=(
             'core/Clash.Meta/adapter/outbound/helper_proxy.go'
             'core/Clash.Meta/adapter/outbound/juicity_native.go'
@@ -64,18 +70,20 @@ jobs:
               custom_count=$((custom_count + 1))
             fi
           done
+
           set +e
           git merge --no-commit --no-ff "$upstream_ref" >"$RUNNER_TEMP/merge.log" 2>&1
           merge_status=$?
           set -e
           git diff --name-only --diff-filter=U >"$RUNNER_TEMP/conflicts.txt" || true
           conflict_count="$(wc -l <"$RUNNER_TEMP/conflicts.txt" | tr -d ' ')"
+
           {
             echo '### FlClash 0.9.1 sync audit'
             echo
             echo "- Source commit: $SOURCE_REF"
             echo "- Upstream: $UPSTREAM_TAG ($upstream_sha)"
-            echo "- Merge base: ${merge_base:-none}"
+            echo "- Merge base: $merge_base"
             echo "- Merge status: $merge_status"
             echo "- Conflict paths: $conflict_count"
             echo "- File entries: $source_count source / $upstream_count upstream"
@@ -85,6 +93,11 @@ jobs:
             sed 's/^/- /' "$RUNNER_TEMP/conflicts.txt"
             echo
             echo 'No private source contents, code, or diff bodies were printed or uploaded.'
-          } >> "$GITHUB_STEP_SUMMARY"
-          echo "Audit completed: status=$merge_status conflicts=$conflict_count"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
 
+          if (( merge_status > 1 )) || { (( merge_status == 1 )) && (( conflict_count == 0 )); }; then
+            echo 'Git merge failed for a reason other than reported content conflicts; sanitized diagnostic follows.' >&2
+            sed -n '1,12p' "$RUNNER_TEMP/merge.log" >&2
+            exit 1
+          fi
+          echo "Audit completed: status=$merge_status conflicts=$conflict_count"
