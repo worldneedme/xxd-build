@@ -71,10 +71,13 @@ jobs:
           flutter pub get > "$RUNNER_TEMP/format-pub.log" 2>&1
           yq -i '.hooks.user_defines.setup.build_assets = false | .hooks.user_defines.rust_api.build_assets = false' pubspec.yaml
           dart run build_runner build --delete-conflicting-outputs > "$RUNNER_TEMP/generate.log" 2>&1 || { tail -n 25 "$RUNNER_TEMP/generate.log"; exit 1; }
+          sudo apt-get update -qq > "$RUNNER_TEMP/icons-apt.log" 2>&1
+          sudo apt-get install -y librsvg2-bin >> "$RUNNER_TEMP/icons-apt.log" 2>&1
+          dart run tool/generate_status_icons.dart > "$RUNNER_TEMP/icons.log" 2>&1 || { tail -n 20 "$RUNNER_TEMP/icons.log"; exit 1; }
           git restore -- pubspec.yaml
           dart format lib test tool plugins setup.dart > "$RUNNER_TEMP/format.log" 2>&1
           git diff --check
-          git add --update -- lib test tool plugins setup.dart
+          git add --update -- lib test tool plugins setup.dart assets/images/tray windows/runner/resources/app_icon.ico
           if ! git diff --cached --quiet; then
             git config user.name github-actions
             git config user.email 41898282+github-actions[bot]@users.noreply.github.com
@@ -122,6 +125,16 @@ jobs:
             grep -E ' (error|warning) [•-]|^error |^warning ' "$RUNNER_TEMP/analyze.log" | head -n 50 || true
             exit 1
           fi
+      - name: Verify V1 tray generation is reproducible
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq > "$RUNNER_TEMP/icons-apt.log" 2>&1
+          sudo apt-get install -y librsvg2-bin >> "$RUNNER_TEMP/icons-apt.log" 2>&1
+          yq -i '.hooks.user_defines.setup.build_assets = false | .hooks.user_defines.rust_api.build_assets = false' pubspec.yaml
+          dart run tool/generate_status_icons.dart > "$RUNNER_TEMP/icons.log" 2>&1
+          git restore -- pubspec.yaml
+          git diff --exit-code -- assets/images/tray windows/runner/resources/app_icon.ico
       - name: Full Flutter regression including native Rust tests
         shell: bash
         run: |
