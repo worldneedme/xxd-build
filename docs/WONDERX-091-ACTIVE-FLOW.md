@@ -60,3 +60,14 @@ Go 包装层 go test . 失败，日志展示需定位具体断言，未跳过或
 - Windows 实际安装/启动/RPC、Android 新版 gomobile 包结构/JVM 检查与成对发布
   已加入唯一工作流；只有五轮和全部前置/双平台成功才有真实 Release。
 - 详细步骤与回滚：docs/WONDERX-091-UPGRADE-20261021.md。
+
+
+## 15:02 UTC：五轮状态泄漏定位与重验
+- 39620764738：Go wrapper 五轮失败；已取消未完成的其他 job，不计验收通过。
+- 根因：core/route_test.go 的 TestRouteEpochFollowsStructuralChanges 调用 updateConfig 切换 Global 后没有恢复 tunnel.Mode。第一次顺序运行可过，第二轮 probe 只有 DIRECT fixture，却残留 Global 模式，导致 tunnel.resolveMetadata 取不到 GLOBAL，在 DialContext 崩溃。
+- 最小修复：测试保存原 mode，并在 t.Cleanup 恢复。未更改 Mihomo、协议、生产逻辑；未减少轮数、未删除/放宽断言。重复测试继续覆盖此问题。
+- 当前不可变客户端源码：c34637e714bbf3bdd429043de4f69d4ac18b8b2b。
+- 当前 workflow：bbd26c1dd69e39738c271d45adf15ca96f6ca8fc；Go verbose 输出保留失败测试名。
+- 当前运行：https://github.com/worldneedme/xxd-build/actions/runs/39622054524 。五轮完整 Flutter + native/plugin 验收，全部成功才开始双平台打包，再检查 Windows 安装/启动/Core RPC、Android JNI/helper/JVM，最后成对发布。
+- 发布标签预留 wonderx-v1-0.9.1-official-ui-20261021-1455；目前无交付 Release，不得当作下载链接。
+- 子智能体只读监控；主智能体负责诊断和修复。所有编辑走 GitHub API，测试/编译均 GitHub-hosted runner，无 VPS 本地构建。
