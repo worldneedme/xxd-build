@@ -77,3 +77,16 @@ Full run39659572718 FAILED in Flutter round1 (4300 passed,4 failed,6 skipped); n
 Failures: optional legal page test, V1 header drag test, optional connections table sort/resize tests.
 Packaging/publish SKIPPED. Expanded focused diagnostics run39660700593; source unchanged baaacf5d.
 Do not count failed round as completed regression. Next: use actual exception details, repair minimal setup/behavior, normalize if source changes, restart all five rounds.
+
+
+## 2026-10-21 19:25 UTC — Windows installer/shortcut naming addition
+User requires installer display WONDERX V1 and desktop shortcut V1.
+Source patch2c2334cf23a3277cee3acc6771b73e0963fa1b8c includes:
+- AppId/executable/app-data unchanged; default desktop shortcut V1, explicit uninstall display WONDERX V1.
+- Legacy WONDERX V1.lnk deleted only if its target equals this installation executable.
+- Source packaging identity regression retained alongside actual Windows install smoke.
+- Consumer test hosts: legal ProviderScope; direct optional ConnectionsTableCard; settled brand drag.
+Normalization run39661357336 RUNNING; not yet delivered.
+Workflow942099f26444565d2e6ea3c663bebd872ba1809d adds actual registry/V1.lnk/legacy-cleanup checks and scoped smoke cleanup.
+Previous diagnostic39660700593 FAILED; native passed; package jobs skipped.
+No production changes; source PRIVATE; build temporarily PUBLIC until delivery/cleanup.
