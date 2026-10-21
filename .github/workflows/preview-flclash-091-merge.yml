@@ -9,6 +9,12 @@ on:
         default: '48d99d0cefaa972dafa072c3470e9bad881d0be2'
         type: string
 
+      normalize_only:
+        description: Format reviewed changes on the private candidate branch only
+        required: false
+        default: false
+        type: boolean
+
 permissions:
   contents: read
 
@@ -20,7 +26,42 @@ env:
   SOURCE_SHA: ${{ inputs.source_sha || '48d99d0cefaa972dafa072c3470e9bad881d0be2' }}
 
 jobs:
+  format:
+    if: inputs.normalize_only == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: worldneedme/xxdmanfl0609
+          ref: ${{ env.SOURCE_SHA }}
+          ssh-key: ${{ secrets.SOURCE_WRITE_KEY }}
+          fetch-depth: 0
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.7'
+          channel: stable
+          cache: true
+      - name: Format reviewed test and commit without rewriting history
+        shell: bash
+        run: |
+          set -euo pipefail
+          target=codex/flclash-0.9.1-complete-20261021
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$(git ls-remote origin "refs/heads/$target" | cut -f1)" = "$SOURCE_SHA"
+          dart format test/views/dashboard/current_outbound_test.dart > "$RUNNER_TEMP/format.log" 2>&1
+          git diff --check
+          git add test/views/dashboard/current_outbound_test.dart
+          if ! git diff --cached --quiet; then
+            git config user.name github-actions
+            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+            git commit -m "style: format node-name dashboard regressions" > "$RUNNER_TEMP/commit.log"
+            git push origin "HEAD:refs/heads/$target"
+          fi
+          echo "Formatted source SHA: $(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
   flutter:
+    if: inputs.normalize_only != true
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -81,6 +122,7 @@ jobs:
         run: echo "Flutter full validation PASS; source $SOURCE_SHA" >> "$GITHUB_STEP_SUMMARY"
 
   native:
+    if: inputs.normalize_only != true
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -105,7 +147,7 @@ jobs:
           set -euo pipefail
           for command in 'go test .' 'go vet . ./cmd/...' 'env GOOS=android GOARCH=arm64 go vet -tags=with_gvisor . ./mobile ./tun ./platform'; do
             if ! bash -c "$command" > "$RUNNER_TEMP/go-wrapper.log" 2>&1; then
-              tail -n 25 "$RUNNER_TEMP/go-wrapper.log"
+              grep -A 10 -E '^--- FAIL|^# |^.*\.go:[0-9]+:' "$RUNNER_TEMP/go-wrapper.log" | head -n 80 || true
               exit 1
             fi
           done
