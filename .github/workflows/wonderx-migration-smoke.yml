@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 env:
-  SOURCE_SHA: bae9ab239995b01899ce52d6a587a5ff3123e9bf
+  SOURCE_SHA: d1b08e816dbb7b069a54f4a51d0e97366cafcdbd
   FLUTTER_VERSION: '3.44.4'
   GO_VERSION: '1.26.4'
   NAIVE_VERSION: 'v154.0.8037.49-3'
