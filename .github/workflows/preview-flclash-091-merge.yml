@@ -50,6 +50,7 @@ jobs:
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           test "$(git ls-remote origin "refs/heads/$target" | cut -f1)" = "$SOURCE_SHA"
+          flutter pub get > "$RUNNER_TEMP/format-pub.log" 2>&1
           dart format test/views/dashboard/current_outbound_test.dart > "$RUNNER_TEMP/format.log" 2>&1
           git diff --check
           git add test/views/dashboard/current_outbound_test.dart
