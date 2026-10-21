@@ -96,3 +96,9 @@ Five-round unified run https://github.com/worldneedme/xxd-build/actions/runs/396
 Workflow run SHAa93b2f951f99c723a43f7d9edcd2d049e103cb84, functional942099f26444565d2e6ea3c663bebd872ba1809d.
 Tagwonderx-v1-0.9.1-consumer-ui-v1-installer-20261021-1928 intended, not published yet.
 Next: focused regression→five full rounds→paired Windows/Android checks→release→writer revocation/PRIVATE restoration.
+
+Focused consumer UI regressions in39661857289 PASSED (all prior4 failures repaired); native PASSED. Full5 RUNNING.
+Temporary normalization writer cleanup completed: SecretSOURCE_WRITE_KEY deleted, source deploy key167221912 deleted;
+exact credential files /root/wonderx-ui-writer-Eu0FLWI8/source_writer and source_writer.pub deleted; empty directory removed.
+Read-only source key164797195, SOURCE_READ_KEY, DANGERX_READ_KEY and HKDEV_TEST_SUBSCRIPTION_URL preserved.
+Build stays PUBLIC only while current hosted build is active; restore PRIVATE after checked release/final handoff.
