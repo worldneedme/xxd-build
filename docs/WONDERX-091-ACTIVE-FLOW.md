@@ -71,3 +71,8 @@ Go 包装层 go test . 失败，日志展示需定位具体断言，未跳过或
 - 当前运行：https://github.com/worldneedme/xxd-build/actions/runs/39622054524 。五轮完整 Flutter + native/plugin 验收，全部成功才开始双平台打包，再检查 Windows 安装/启动/Core RPC、Android JNI/helper/JVM，最后成对发布。
 - 发布标签预留 wonderx-v1-0.9.1-official-ui-20261021-1455；目前无交付 Release，不得当作下载链接。
 - 子智能体只读监控；主智能体负责诊断和修复。所有编辑走 GitHub API，测试/编译均 GitHub-hosted runner，无 VPS 本地构建。
+
+## 15:07 UTC 原生门禁
+- 39622054524 / native job 119297898985：PASSED，15:03:59 UTC 完成。
+- Go wrapper -count=5、desktop/Android vet、自定义 parser/adapter/Juicity Hop/Sudoku、Rust 两组件全部成功；runner 标签 ubuntu-latest（GitHub 托管）。
+- Flutter 五轮仍 RUNNING；平台打包/发布 NOT_STARTED。仅 native 成功不计完整验收或可交付。
