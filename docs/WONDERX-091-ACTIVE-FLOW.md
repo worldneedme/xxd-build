@@ -67,3 +67,8 @@ Previous run 39658285587 FAILED static analysis: obsolete mandatory-consent test
 Those tests now cover read-only legal navigation/scrolling/back on desktop, phone and remote; unrelated dialogs retained.
 Five full successful final-source rounds and packages remain NOT_STARTED; no new release delivered yet.
 Temporary writer/secret cleanup and xxd-build PRIVATE restoration remain mandatory at completion.
+
+Normalization 39659152638 PASSED; final generated source baaacf5d0d24990fe6e7b4e8bde4ae3feea16428.
+Full five-round regression + paired package run: https://github.com/worldneedme/xxd-build/actions/runs/39659572718 — RUNNING.
+Workflow run HEAD94ece9c2899817d7cc14ac1dead452512144f5c1; functional workflow3c395b9e449bac1995956bbe2aacf38995f57652.
+Intended tag: wonderx-v1-0.9.1-consumer-ui-direct-start-20261021-1913 (NOT YET DELIVERED).
