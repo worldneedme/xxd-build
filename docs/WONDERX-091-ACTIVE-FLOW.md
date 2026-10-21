@@ -13,7 +13,7 @@
 
 ## Current authorized follow-up
 Consumer UI and V1 branding only. No core/protocol changes.
-Source candidate: 13236635f76b7ff4e012243c2ff2c1678db085c2.
+Source candidate: 3c69b46bdd9da866123de8d2b1da95887f326e42.
 Detailed source HANDOVER: docs/WONDERX-091-CONSUMER-UI-HANDOVER.md.
 Five full regression rounds must pass on the generated immutable source before packaging.
 Windows EXE/ZIP and Android arm64 APK must publish together under a NEW tag.
@@ -22,9 +22,11 @@ All runs use GitHub-hosted runners; no local build/test/dependency/artifact acti
 
 ## Current stages
 Implementation: candidate committed.
-Hosted generation: RUNNING — https://github.com/worldneedme/xxd-build/actions/runs/39655732620.
+Hosted generation: PASSED — run 39655732620; generated source ca079500b804bd43a061927b693b7f5fe675f8c6.
 Temporary source writer deploy key: 167221912 (remove after hosted generation/delivery).
 Earlier normalization 39655618408 was cancelled before generation to include the inline footer argument correction.
-Five-round regression: NOT_STARTED.
-Paired packaging and publish: NOT_STARTED.
+Five-round regression: RUNNING — https://github.com/worldneedme/xxd-build/actions/runs/39656275507.
+Immutable source: 3c69b46bdd9da866123de8d2b1da95887f326e42.
+Release tag: wonderx-v1-0.9.1-consumer-ui-20261021-1850.
+Paired packaging and publish: waits for both five-round validation jobs.
 PRIVATE restoration and temporary-key cleanup: required after delivery.
