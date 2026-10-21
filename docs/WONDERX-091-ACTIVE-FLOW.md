@@ -48,3 +48,15 @@ Go 包装层 go test . 失败，日志展示需定位具体断言，未跳过或
 - 用户授权的子智能体 /root/monitor_091_ci 正在只读监控，主智能体负责修复，不把排队当失败、不把格式化当回归。
 - 下一步：待生成结束读取分支最新 SHA，再运行完整 Flutter/native/plugin 回归；最终源码五轮成功后才打包交付。
 - 此任务无服务端修改、无生产修改。源码 PRIVATE、构建临时 PUBLIC；交付后恢复构建 PRIVATE。
+
+## 14:54 UTC 后续进展
+- 完整验收 39619272899：PASSED；源码 f8eb5acaab3d508a440a664e7fb5410c72fe0470。
+  Flutter 根套件、bundled plugins、setup_hooks、Go wrapper、自定义协议和 Rust 均成功。
+- 五轮运行 39620317486：native 在 Go wrapper 重复执行阶段失败；
+  旧日志筛选器漏掉实际 stderr，原因未明。已请求取消，不能计作五轮通过。
+- 已改为失败时打印命令与 bounded stderr，不猜测、不删除测试。
+- 同源码重验运行：https://github.com/worldneedme/xxd-build/actions/runs/39620764738 ；
+  workflow 75f4af44b932b718ac49a45fad5877ab6f367478。
+- Windows 实际安装/启动/RPC、Android 新版 gomobile 包结构/JVM 检查与成对发布
+  已加入唯一工作流；只有五轮和全部前置/双平台成功才有真实 Release。
+- 详细步骤与回滚：docs/WONDERX-091-UPGRADE-20261021.md。
