@@ -1,0 +1,129 @@
+name: WONDERX 0.9.1 official-base integration
+
+on:
+  push:
+    branches:
+      - work/wonderx-091-validation
+    paths:
+      - .github/workflows/wonderx-091-official-base.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ui-core:
+    name: Official 0.9.1 UI plus protected private core
+    runs-on: ubuntu-latest
+    timeout-minutes: 80
+    env:
+      SOURCE_SHA: '2d90609381e69ee586e8945a69d72b9baba7860d'
+      UPSTREAM_TAG: v0.9.1
+    steps:
+      - name: Checkout private source commit
+        uses: actions/checkout@v4
+        with:
+          repository: worldneedme/xxdmanfl0609
+          ref: ${{ env.SOURCE_SHA }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Compose official 0.9.1 UI with WONDERX custom core and logos
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git remote add official https://github.com/chen08209/FlClash.git
+          git fetch --no-tags official "+refs/tags/$UPSTREAM_TAG:refs/tags/wonderx-official"
+          original_core=$(git rev-parse "$SOURCE_SHA:core/Clash.Meta")
+          original_icon=$(git rev-parse "$SOURCE_SHA:assets/images/icon.png")
+          original_ico=$(git rev-parse "$SOURCE_SHA:assets/images/icon.ico")
+          rm -rf core/Clash.Meta
+          git read-tree --reset -u refs/tags/wonderx-official
+          git rm -f --cached --ignore-unmatch core/Clash.Meta
+          rm -rf core/Clash.Meta
+          git restore --source="$SOURCE_SHA" --staged --worktree -- core/Clash.Meta
+          git rm -f --ignore-unmatch .gitmodules
+          for asset in assets/images/icon.png assets/images/icon.ico; do
+            git restore --source="$SOURCE_SHA" --staged --worktree -- "$asset"
+          done
+          while IFS= read -r asset; do
+            git restore --source="$SOURCE_SHA" --staged --worktree -- "$asset"
+          done < <(git ls-tree -r --name-only "$SOURCE_SHA" android/app/src/main/res |
+            grep -E '(/mipmap-[^/]+/ic_launcher|/mipmap-[^/]+/ic_banner|/drawable-nodpi/ic_launcher)' || true)
+          python3 - <<'PY'
+          from pathlib import Path
+          constants = Path('lib/common/constant.dart')
+          text = constants.read_text(encoding='utf-8')
+          target = "const appName = 'FlClash';"
+          assert text.count(target) == 1
+          text = text.replace(target, target + "\nconst brandName = 'WONDERX V1';\nconst displayAppName = '𝙒𝙊𝙉𝘿𝙀𝙍𝙓 V1';")
+          constants.write_text(text, encoding='utf-8')
+          app = Path('lib/application.dart')
+          text = app.read_text(encoding='utf-8')
+          assert text.count('title: appName,') == 1
+          app.write_text(text.replace('title: appName,', 'title: displayAppName,'), encoding='utf-8')
+          PY
+          test "$(git rev-parse "$(git write-tree):core/Clash.Meta")" = "$original_core"
+          test "$(git rev-parse :assets/images/icon.png)" = "$original_icon"
+          test "$(git rev-parse :assets/images/icon.ico)" = "$original_ico"
+          test -f lib/ui/theme.dart
+          test -f lib/ui/navigation_dock.dart
+          test -f lib/views/dashboard/layout.dart
+          test -f lib/views/dashboard/widgets/current_outbound.dart
+          test -f lib/views/theme_preview.dart
+          test -f core/Clash.Meta/adapter/outbound/juicity_native.go
+          test -f core/Clash.Meta/adapter/outbound/helper_proxy.go
+          grep -q '^version: 0.9.1' pubspec.yaml
+          grep -q "displayAppName" lib/application.dart
+          git diff --stat HEAD | tail -n 1
+          {
+            echo "## WONDERX v0.9.1 official UI integration"
+            echo "- Official UI, navigation, theme, dashboard: imported from $UPSTREAM_TAG"
+            echo "- Custom core tree: $original_core (unchanged)"
+            echo "- WONDERX desktop icon blobs: unchanged"
+            echo "- Private source commit: $SOURCE_SHA"
+            echo "- No private source published or uploaded"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.47.7'
+          cache: true
+
+      - name: Install Flutter packages
+        run: flutter pub get
+
+      - name: Analyze full official UI
+        run: flutter analyze --no-fatal-infos
+
+      - name: Run widget and unit tests
+        shell: bash
+        run: |
+          if grep -q '^hooks:' pubspec.yaml; then
+            yq -i '.hooks.user_defines.setup.build_assets = false | .hooks.user_defines.rust_api.build_assets = false' pubspec.yaml
+          fi
+          flutter test --reporter expanded
+
+      - name: Setup Go 1.27
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.1'
+          cache-dependency-path: |
+            core/go.sum
+            core/Clash.Meta/go.sum
+
+      - name: Compile custom Mihomo Go adapter
+        working-directory: core/Clash.Meta
+        run: |
+          go test ./adapter ./config ./adapter/outbound -run 'TestParseHelperBackedProtocols|TestParseHelperBackedProtocolConfig|TestJuicityNativeConstruction|TestMieru' -count=1 -timeout=240s
+
+      - name: Confirm integration checks passed
+        if: success()
+        run: |
+          echo "- Flutter dependency/analyzer/widget tests: PASS" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Custom Go adapter tests: PASS" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Cross-platform app compilation and live connections: NOT TESTED" >> "$GITHUB_STEP_SUMMARY"
