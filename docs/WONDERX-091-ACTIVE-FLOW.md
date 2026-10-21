@@ -102,3 +102,14 @@ Temporary normalization writer cleanup completed: SecretSOURCE_WRITE_KEY deleted
 exact credential files /root/wonderx-ui-writer-Eu0FLWI8/source_writer and source_writer.pub deleted; empty directory removed.
 Read-only source key164797195, SOURCE_READ_KEY, DANGERX_READ_KEY and HKDEV_TEST_SUBSCRIPTION_URL preserved.
 Build stays PUBLIC only while current hosted build is active; restore PRIVATE after checked release/final handoff.
+
+
+User requested repeatable future core-only upgrades, documented privately and locally.
+Private source docs commit8f361fa13d886ce8e147fc1f497b40cae1814ba9:
+README.md maintenance entry and docs/README-CORE-UPGRADE.md.
+Local restricted copy /root/wonderx-ai-notes/WONDERX-V1-CORE-UPGRADE-RUNBOOK.md (0600).
+Covers UI/identity preservation, custom protocol patch carry, pinned upstream/helper/toolchain sources,
+five-round hosted gates, full Windows core+Helper+manifest and Android JNI rebuild, signing/rollback/privacy.
+No new core/UI behavior changed after immutable build source0b6781447ed133ac9967cacc52bd628001fb4c51.
+Current core_version declarationv1.19.32; vendored core tree6a9b8de999c20f5061e28a9d15dfd89a697436b6.
+Do not mistake the docs-only branch HEAD for a different software candidate.
