@@ -1,0 +1,88 @@
+name: Audit replay of post-0.9.0 WonderX fixes
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Full private client commit to audit
+        required: true
+        type: string
+      custom_base_ref:
+        description: Full commit of the 0.9.0 custom baseline
+        required: true
+        type: string
+      upstream_tag:
+        description: Official FlClash release tag
+        required: true
+        default: v0.9.1
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  replay-audit:
+    name: Simulate replay of recent custom fixes on official release
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout private client history
+        uses: actions/checkout@v4
+        with:
+          repository: worldneedme/xxdmanfl0609
+          ref: ${{ inputs.source_ref }}
+          fetch-depth: 0
+          filter: blob:none
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          persist-credentials: false
+
+      - name: Try replay without publishing files
+        shell: bash
+        env:
+          SOURCE_REF: ${{ inputs.source_ref }}
+          CUSTOM_BASE_REF: ${{ inputs.custom_base_ref }}
+          UPSTREAM_TAG: ${{ inputs.upstream_tag }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$SOURCE_REF" =~ ^[0-9a-f]{40}$ ]] || { echo 'source_ref must be a full commit SHA' >&2; exit 1; }
+          [[ "$CUSTOM_BASE_REF" =~ ^[0-9a-f]{40}$ ]] || { echo 'custom_base_ref must be a full commit SHA' >&2; exit 1; }
+          [[ "$UPSTREAM_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'upstream_tag must be a release tag' >&2; exit 1; }
+          test "$(git rev-parse HEAD)" = "$SOURCE_REF"
+          git remote add flclash-upstream https://github.com/chen08209/FlClash.git
+          git fetch --no-tags --filter=blob:none flclash-upstream \
+            "+refs/tags/$UPSTREAM_TAG:refs/tags/audit-upstream-$UPSTREAM_TAG"
+          upstream_ref="refs/tags/audit-upstream-$UPSTREAM_TAG"
+          upstream_sha="$(git rev-parse "${upstream_ref}^{commit}")"
+          test "$(git merge-base "$CUSTOM_BASE_REF" "$SOURCE_REF")" = "$CUSTOM_BASE_REF"
+
+          git config user.name 'GitHub Audit'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch --detach "$upstream_ref"
+          set +e
+          git cherry-pick --no-commit "$CUSTOM_BASE_REF..$SOURCE_REF" >"$RUNNER_TEMP/replay.log" 2>&1
+          replay_status=$?
+          set -e
+          git diff --name-only --diff-filter=U >"$RUNNER_TEMP/conflicts.txt" || true
+          conflict_count="$(wc -l <"$RUNNER_TEMP/conflicts.txt" | tr -d ' ')"
+          commit_count="$(git rev-list --count "$CUSTOM_BASE_REF..$SOURCE_REF")"
+          {
+            echo '### Post-0.9.0 custom-fix replay audit'
+            echo
+            echo "- Custom baseline: $CUSTOM_BASE_REF"
+            echo "- Source head: $SOURCE_REF"
+            echo "- Recent custom commits: $commit_count"
+            echo "- Official release: $UPSTREAM_TAG ($upstream_sha)"
+            echo "- Replay status: $replay_status"
+            echo "- Conflict paths: $conflict_count"
+            echo
+            echo 'Conflict paths (names only):'
+            sed 's/^/- /' "$RUNNER_TEMP/conflicts.txt"
+            echo
+            echo 'No private source contents, code, or diff bodies were printed or uploaded.'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          if (( replay_status > 1 )) || { (( replay_status == 1 )) && (( conflict_count == 0 )); }; then
+            echo 'Replay failed for a reason other than reported content conflicts.' >&2
+            sed -n '1,12p' "$RUNNER_TEMP/replay.log" >&2
+            exit 1
+          fi
+          echo "Replay audit completed: status=$replay_status conflicts=$conflict_count"
