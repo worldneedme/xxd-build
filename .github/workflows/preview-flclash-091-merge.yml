@@ -1,101 +1,133 @@
-name: Materialize WONDERX official 0.9.1
+name: WONDERX 0.9.1 unified validation
+
 on:
-  push:
-    branches: [main]
-    paths: [.github/workflows/preview-flclash-091-merge.yml]
   workflow_dispatch:
     inputs:
       source_sha:
+        description: Full materialized private source SHA
         required: true
+        default: '48d99d0cefaa972dafa072c3470e9bad881d0be2'
         type: string
-      target_branch:
-        required: true
-        type: string
+
 permissions:
   contents: read
+
+concurrency:
+  group: wonderx-091-validation-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  SOURCE_SHA: ${{ inputs.source_sha || '48d99d0cefaa972dafa072c3470e9bad881d0be2' }}
+
 jobs:
-  materialize:
-    if: github.event_name == 'workflow_dispatch'
+  flutter:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
           repository: worldneedme/xxdmanfl0609
-          ref: ${{ inputs.source_sha }}
-          fetch-depth: 0
-          ssh-key: ${{ secrets.SOURCE_WRITE_KEY }}
-          persist-credentials: true
-      - name: Compose private source
-        env:
-          WONDERX_SOURCE_SHA: ${{ inputs.source_sha }}
-          TARGET_BRANCH: ${{ inputs.target_branch }}
+          ref: ${{ env.SOURCE_SHA }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          persist-credentials: false
+      - name: Verify immutable source
         shell: bash
         run: |
-          set -Eeuo pipefail
-          [[ "$WONDERX_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
-          test "$TARGET_BRANCH" = codex/flclash-0.9.1-complete-20261021
-          test "$(git rev-parse HEAD)" = "$WONDERX_SOURCE_SHA"
-          cp tool/wonderx_091_finalize.py "$RUNNER_TEMP/finalize.py"
-          if ! bash tool/wonderx_091_compose.sh >"$RUNNER_TEMP/compose.log" 2>&1; then
-            tail -n 1 "$RUNNER_TEMP/compose.log"
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test -s lib/views/dashboard/widgets/current_node_name.dart
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.7'
+          channel: stable
+          cache: true
+      - name: Resolve dependencies
+        shell: bash
+        run: |
+          flutter pub get > "$RUNNER_TEMP/pub.log" 2>&1 || { echo 'Dependency resolution failed'; exit 1; }
+      - name: Analyze and verify formatting
+        shell: bash
+        run: |
+          set -euo pipefail
+          dart format --output=none --set-exit-if-changed lib test tool plugins setup.dart > "$RUNNER_TEMP/format.log" 2>&1 || { tail -n 20 "$RUNNER_TEMP/format.log"; exit 1; }
+          if ! flutter analyze --no-fatal-infos > "$RUNNER_TEMP/analyze.log" 2>&1; then
+            grep -E ' (error|warning) [•-]|^error |^warning ' "$RUNNER_TEMP/analyze.log" | head -n 50 || true
             exit 1
           fi
-          test "$(git rev-parse refs/tags/wonderx-v091^{commit})" = 8d4f9744948751f1273fe871e1d05276fac09b0e
-          if ! python3 "$RUNNER_TEMP/finalize.py" >"$RUNNER_TEMP/finalize.log" 2>&1; then
-            tail -n 1 "$RUNNER_TEMP/finalize.log"
+      - name: Full Flutter regression including native Rust tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          yq -i '.hooks.user_defines.setup.build_assets = false' pubspec.yaml
+          if ! dart run tool/test.dart > "$RUNNER_TEMP/flutter-test.log" 2>&1; then
+            grep -E '(\[E\]|Expected:|Actual:|Error:|error:|Some tests failed|Failed to load|Test failed|TestFailure)' "$RUNNER_TEMP/flutter-test.log" | tail -n 70 || true
             exit 1
           fi
-          git restore --source="$WONDERX_SOURCE_SHA" --staged --worktree -- \
-            tool/wonderx_091_finalize.py test/wonderx_091_behaviour_test.dart
-          yq -i '.hooks.user_defines.setup.build_assets = false | .hooks.user_defines.rust_api.build_assets = false' pubspec.yaml
+          tail -n 3 "$RUNNER_TEMP/flutter-test.log"
+      - name: Verify bundled plugins and setup hooks
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! bash tool/check_plugins.sh > "$RUNNER_TEMP/plugins.log" 2>&1; then
+            grep -E '(error |warning |Error:|\[E\]|Failed|failed)' "$RUNNER_TEMP/plugins.log" | tail -n 30 || true
+            exit 1
+          fi
+          cd plugins/setup/setup_hooks
+          dart pub get > "$RUNNER_TEMP/setup-pub.log" 2>&1
+          dart analyze > "$RUNNER_TEMP/setup-analyze.log" 2>&1
+          dart test > "$RUNNER_TEMP/setup-tests.log" 2>&1
+      - name: Record evidence
+        run: echo "Flutter full validation PASS; source $SOURCE_SHA" >> "$GITHUB_STEP_SUMMARY"
+
+  native:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: worldneedme/xxdmanfl0609
+          ref: ${{ env.SOURCE_SHA }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version: '1.27.1'
           cache-dependency-path: |
             core/go.sum
             core/Clash.Meta/go.sum
-      - uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          flutter-version: '3.47.7'
-          cache: true
-      - name: Resolve dependencies and regenerate models
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          flutter pub get >"$RUNNER_TEMP/pub.log" 2>&1 || { tail -n 3 "$RUNNER_TEMP/pub.log"; exit 1; }
-          dart run build_runner build --delete-conflicting-outputs >"$RUNNER_TEMP/codegen.log" 2>&1 || {
-            tail -n 5 "$RUNNER_TEMP/codegen.log"; exit 1;
-          }
-          (cd core && go mod tidy) >"$RUNNER_TEMP/tidy.log" 2>&1 || { tail -n 5 "$RUNNER_TEMP/tidy.log"; exit 1; }
-          yq -i '.hooks.user_defines.setup.build_assets = true | .hooks.user_defines.rust_api.build_assets = true' pubspec.yaml
-          dart format lib test tool plugins setup.dart >"$RUNNER_TEMP/format.log" 2>&1 || { tail -n 3 "$RUNNER_TEMP/format.log"; exit 1; }
-          gofmt -w core/connection.go core/delay.go core/lib.go core/lifecycle.go core/tun/tun.go
-      - name: Commit complete candidate
+      - name: Go wrapper and Android bridge
+        working-directory: core
         env:
-          SOURCE_SHA: ${{ inputs.source_sha }}
-          TARGET_BRANCH: ${{ inputs.target_branch }}
+          CGO_ENABLED: 0
         shell: bash
         run: |
-          set -Eeuo pipefail
-          test "$(git ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)" = "$SOURCE_SHA"
-          git add -u
-          git add lib/views/dashboard/widgets/current_node_name.dart \
-            test/widgets/current_node_name_test.dart test/widgets/current_node_runtime_test.dart \
-            test/wonderx_091_behaviour_test.dart tool/wonderx_091_finalize.py HANDOVER.md
-          git diff --cached --check >"$RUNNER_TEMP/diff-check.log" 2>&1 || {
-            echo 'Whitespace gate failed'; exit 1;
-          }
-          git config user.name 'worldneedme'
-          git config user.email '32259095+worldneedme@users.noreply.github.com'
-          tree="$(git write-tree)"
-          commit="$(git commit-tree "$tree" -p "$SOURCE_SHA" -p 8d4f9744948751f1273fe871e1d05276fac09b0e \
-            -m 'feat: integrate official FlClash 0.9.1 with V1 protocols and behavior')"
-          git push origin "$commit:refs/heads/$TARGET_BRANCH"
-          {
-            echo '### Materialized candidate'
-            echo "- Client source SHA: $commit"
-            echo '- Official SHA: 8d4f9744948751f1273fe871e1d05276fac09b0e'
-            echo '- Models regenerated; dependency locks resolved; candidate awaiting full checks.'
-          } >> "$GITHUB_STEP_SUMMARY"
+          set -euo pipefail
+          for command in 'go test .' 'go vet . ./cmd/...' 'env GOOS=android GOARCH=arm64 go vet -tags=with_gvisor . ./mobile ./tun ./platform'; do
+            if ! bash -c "$command" > "$RUNNER_TEMP/go-wrapper.log" 2>&1; then
+              tail -n 25 "$RUNNER_TEMP/go-wrapper.log"
+              exit 1
+            fi
+          done
+      - name: Custom protocol parser and adapter regressions
+        working-directory: core/Clash.Meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! go test ./adapter ./config ./adapter/outbound ./transport/sudoku/... \
+            -run 'Test(ParseHelper|Naive|Mieru|Juicity|.*[Hh]ttp[Mm]ask|Sudoku)' \
+            -count=1 -timeout=240s > "$RUNNER_TEMP/protocol-tests.log" 2>&1; then
+            tail -n 30 "$RUNNER_TEMP/protocol-tests.log"
+            exit 1
+          fi
+          tail -n 12 "$RUNNER_TEMP/protocol-tests.log"
+      - name: Rust components
+        shell: bash
+        run: |
+          set -euo pipefail
+          for manifest in services/helper/Cargo.toml plugins/rust_api/rust/Cargo.toml; do
+            cargo fmt --manifest-path "$manifest" -- --check > "$RUNNER_TEMP/rust-fmt.log" 2>&1 || { echo "Rust format failed: $manifest"; exit 1; }
+            cargo test --manifest-path "$manifest" > "$RUNNER_TEMP/rust-tests.log" 2>&1 || { tail -n 25 "$RUNNER_TEMP/rust-tests.log"; exit 1; }
+          done
+      - name: Record evidence
+        run: echo "Go wrapper, custom protocols and Rust PASS; source $SOURCE_SHA" >> "$GITHUB_STEP_SUMMARY"
