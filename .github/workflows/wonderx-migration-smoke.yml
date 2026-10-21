@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 env:
-  SOURCE_SHA: d1b08e816dbb7b069a54f4a51d0e97366cafcdbd
+  SOURCE_SHA: 1920f579b69d735791918d3d76a698fa550b5e5e
   FLUTTER_VERSION: '3.44.4'
   GO_VERSION: '1.26.4'
   NAIVE_VERSION: 'v154.0.8037.49-3'
@@ -174,8 +174,22 @@ jobs:
             python .github/scripts/check_windows_package.py "$archive"
           fi
 
+      - name: Upload test packages
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wonderx-v1-${{ matrix.platform }}-${{ matrix.arch }}-test
+          path: |
+            dist/**/*.apk
+            dist/**/*.exe
+            dist/**/*.zip
+            dist/**/*.sha256
+            dist/SHA256SUMS-*.txt
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Record package smoke result
         if: success()
         shell: bash
         run: |
-          echo "Local ${{ matrix.platform }} package smoke passed on private source $SOURCE_SHA. No packages publicly uploaded." >> "$GITHUB_STEP_SUMMARY"
+          echo "Local ${{ matrix.platform }} package smoke passed on private source $SOURCE_SHA. Artifacts were uploaded to this Actions run; live device and subscription tests remain pending." >> "$GITHUB_STEP_SUMMARY"
