@@ -1,0 +1,181 @@
+name: WONDERX migration smoke (private source)
+
+on:
+  push:
+    branches:
+      - work/wonderx-091-validation
+    paths:
+      - .github/workflows/wonderx-migration-smoke.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  SOURCE_SHA: bae9ab239995b01899ce52d6a587a5ff3123e9bf
+  FLUTTER_VERSION: '3.44.4'
+  GO_VERSION: '1.26.4'
+  NAIVE_VERSION: 'v154.0.8037.49-3'
+  NAIVE_APK_SHA256: 'c65ecdd032a05d85884eed03e231b23c6feff6b59b1e7de7aa1591ba7d692f0a'
+
+jobs:
+  smoke:
+    name: Protected source and regression smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Check out exact private source
+        uses: actions/checkout@v4
+        with:
+          repository: worldneedme/xxdmanfl0609
+          ref: ${{ env.SOURCE_SHA }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          persist-credentials: false
+
+      - name: Verify exact commit and protected assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          python3 .github/scripts/check_wonderx_contract.py
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: |
+            core/go.sum
+            core/Clash.Meta/go.sum
+
+      - name: Core wrapper smoke
+        working-directory: core
+        env:
+          CGO_ENABLED: '0'
+        run: |
+          go test .
+          go vet .
+
+      - name: WONDERX adapter and protocol regression smoke
+        working-directory: core/Clash.Meta
+        run: |
+          go test ./adapter ./config ./adapter/outbound \
+            -run 'TestParseHelperBackedProtocols|TestParseHelperBackedProtocolConfig|TestNaiveProxyPasswordOnlyAndStablePort|TestNaiveProxyH3AlpnUsesQuicScheme|TestCloseAllHelpersKeepsProxyRegistered|TestJuicityNativeConstruction|TestJuicityNativeUsesFirstHopPort|TestJuicityNativeAcceptsCongestionControllerAlias|TestMieru' \
+            -count=1 -timeout=240s
+
+      - name: Flutter SDK
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Dart and widget checks
+        run: |
+          flutter pub get
+          flutter analyze --no-fatal-infos
+          flutter test --reporter expanded
+
+      - name: Smoke report
+        if: success()
+        run: |
+          {
+            echo "## Migration baseline smoke"
+            echo "- Private source commit: $SOURCE_SHA"
+            echo "- WONDERX icon and protocol markers: passed"
+            echo "- Go wrapper, protocol unit tests, Flutter analyze and tests: passed"
+            echo "- Live VPN/proxy connections and device installation: not covered"
+            echo "- FlClash 0.9.1 migration: not yet integrated"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  package-smoke:
+    name: Package smoke ${{ matrix.platform }}
+    needs: smoke
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 110
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: android
+            os: ubuntu-latest
+            arch: arm64
+          - platform: windows
+            os: windows-2022
+            arch: amd64
+    steps:
+      - name: Check out exact private source
+        uses: actions/checkout@v4
+        with:
+          repository: worldneedme/xxdmanfl0609
+          ref: ${{ env.SOURCE_SHA }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          persist-credentials: false
+
+      - name: Verify immutable source
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: |
+            core/go.sum
+            core/Clash.Meta/go.sum
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Setup NDK
+        if: matrix.platform == 'android'
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r28c
+          add-to-path: true
+          link-to-sdk: true
+
+      - name: Enable long paths
+        if: matrix.platform == 'windows'
+        shell: bash
+        run: git config --global core.longpaths true
+
+      - name: Fetch pinned Naive Android helper
+        if: matrix.platform == 'android'
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="naiveproxy-plugin-$NAIVE_VERSION-arm64-v8a.apk"
+          curl -fLsS --retry 4 -o "$RUNNER_TEMP/$apk" \
+            "https://github.com/klzgrad/naiveproxy/releases/download/$NAIVE_VERSION/$apk"
+          echo "$NAIVE_APK_SHA256  $RUNNER_TEMP/$apk" | sha256sum -c -
+          mkdir -p android/app/src/main/jniLibs/arm64-v8a
+          unzip -p "$RUNNER_TEMP/$apk" lib/arm64-v8a/libnaive.so \
+            > android/app/src/main/jniLibs/arm64-v8a/libnaive.so
+          test -s android/app/src/main/jniLibs/arm64-v8a/libnaive.so
+
+      - name: Build local test package (no release or upload)
+        shell: bash
+        run: |
+          flutter pub get
+          if [ "${{ matrix.platform }}" = android ]; then
+            dart setup.dart android --arch arm64 -v
+            python3 .github/scripts/check_android_apk_native_core.py ./dist --abi arm64-v8a
+            test "$(find ./dist -type f -name '*.apk' | wc -l)" -gt 0
+          else
+            dart setup.dart windows -v
+            test "$(find ./dist -type f -name '*.zip' | wc -l)" -gt 0
+            archive=$(find ./dist -type f -name '*-windows-*.zip' -print -quit)
+            test -n "$archive"
+            python .github/scripts/check_windows_package.py "$archive"
+          fi
+
+      - name: Record package smoke result
+        if: success()
+        shell: bash
+        run: |
+          echo "Local ${{ matrix.platform }} package smoke passed on private source $SOURCE_SHA. No packages publicly uploaded." >> "$GITHUB_STEP_SUMMARY"
