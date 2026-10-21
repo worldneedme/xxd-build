@@ -342,6 +342,9 @@ jobs:
       - name: Android JVM lifecycle regressions
         if: matrix.platform == 'android'
         shell: bash
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
         run: |
           set -euo pipefail
           if ! (cd android && bash ./gradlew :common:testDebugUnitTest :service:testDebugUnitTest :app:testDebugUnitTest -Ptarget-platform=android-arm64 --no-daemon) > "$RUNNER_TEMP/android-tests.log" 2>&1; then
