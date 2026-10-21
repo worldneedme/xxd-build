@@ -17,12 +17,12 @@ GitHub-hosted runner。没有 VPS clone、SDK 安装、本地构建或产物下�
 ## 固定来源
 
 - 交付候选分支：codex/flclash-0.9.1-complete-20261021。
-- 当前固定源码：f8eb5acaab3d508a440a664e7fb5410c72fe0470。
+- 当前固定源码：c34637e714bbf3bdd429043de4f69d4ac18b8b2b。
 - 官方 v0.9.1：8d4f9744948751f1273fe871e1d05276fac09b0e。
 - 首个完整实体化候选：48d99d0cefaa972dafa072c3470e9bad881d0be2。
 - 可用旧版回滚：codex/dashboard-direct-fix / 980ce42355b15ecb208c8e502587726e7e83622f。
-- 当前五轮/打包 workflow：1b1e3389991b90c6d123ad18d41ce78957850948。
-- 当前验收运行：https://github.com/worldneedme/xxd-build/actions/runs/39620317486 。
+- 当前五轮/打包 workflow：bbd26c1dd69e39738c271d45adf15ca96f6ca8fc。
+- 当前验收运行：https://github.com/worldneedme/xxd-build/actions/runs/39622054524 。
 
 官方 v0.9.0 与 v0.9.1 的 Mihomo gitlink 同为
 8380d0e7462f061a964323e9bf3129a236fcc5d5。
@@ -84,7 +84,7 @@ GitHub-hosted runner。没有 VPS clone、SDK 安装、本地构建或产物下�
 | 生成与格式化 | PASSED | run 39618825824 |
 | 完整 Flutter / plugin / setup_hooks | PASSED | run 39619272899 |
 | Go wrapper / custom protocols / Rust | PASSED | run 39619272899 |
-| 同 SHA 五轮验收 | RUNNING | run 39620317486 |
+| 同 SHA 五轮验收 | RUNNING | run 39622054524；旧失败运行不计通过 |
 | Windows 安装、启动、Core RPC | NOT_STARTED | 等待前置 |
 | Android APK / JVM | NOT_STARTED | 等待前置 |
 | 双平台真实 Release | NOT_STARTED | 禁止提前交付 |
