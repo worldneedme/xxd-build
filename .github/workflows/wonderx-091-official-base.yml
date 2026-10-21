@@ -82,3 +82,110 @@ jobs:
           echo "- Flutter dependency/analyzer/widget tests: PASS" >> "$GITHUB_STEP_SUMMARY"
           echo "- Custom Go adapter tests: PASS" >> "$GITHUB_STEP_SUMMARY"
           echo "- Cross-platform app compilation and live connections: NOT TESTED" >> "$GITHUB_STEP_SUMMARY"
+
+  packages:
+    name: 0.9.1 ${{ matrix.platform }} integration package
+    needs: ui-core
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 110
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: android
+            os: ubuntu-latest
+            arch: arm64-v8a
+          - platform: windows
+            os: windows-2022
+            arch: amd64
+    env:
+      SOURCE_SHA: '5903b846b81eef30c15e66cbf29cbced00f5d779'
+      NAIVE_VERSION: 'v154.0.8037.49-3'
+      NAIVE_APK_SHA256: 'c65ecdd032a05d85884eed03e231b23c6feff6b59b1e7de7aa1591ba7d692f0a'
+    steps:
+      - name: Checkout protected source
+        uses: actions/checkout@v4
+        with:
+          repository: worldneedme/xxdmanfl0609
+          ref: ${{ env.SOURCE_SHA }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Prepare source with official UI and WONDERX protocols
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git config --global core.longpaths true
+          bash tool/wonderx_091_compose.sh
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.1'
+          cache-dependency-path: |
+            core/go.sum
+            core/Clash.Meta/go.sum
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.47.7'
+          cache: true
+
+      - name: Setup NDK
+        if: matrix.platform == 'android'
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r28c
+          add-to-path: true
+          link-to-sdk: true
+
+      - name: Fetch pinned Naive Android helper
+        if: matrix.platform == 'android'
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="naiveproxy-plugin-$NAIVE_VERSION-arm64-v8a.apk"
+          curl -fLsS --retry 4 -o "$RUNNER_TEMP/$apk" \
+            "https://github.com/klzgrad/naiveproxy/releases/download/$NAIVE_VERSION/$apk"
+          echo "$NAIVE_APK_SHA256  $RUNNER_TEMP/$apk" | sha256sum -c -
+          mkdir -p android/app/src/main/jniLibs/arm64-v8a
+          unzip -p "$RUNNER_TEMP/$apk" lib/arm64-v8a/libnaive.so \
+            > android/app/src/main/jniLibs/arm64-v8a/libnaive.so
+          test -s android/app/src/main/jniLibs/arm64-v8a/libnaive.so
+
+      - name: Build Android or Windows test package
+        shell: bash
+        run: |
+          set -euo pipefail
+          flutter pub get
+          if [ "${{ matrix.platform }}" = 'android' ]; then
+            dart setup.dart android --arch arm64 -v
+            test "$(find ./dist -type f -name '*.apk' | wc -l)" -gt 0
+          else
+            dart setup.dart windows -v
+            test "$(find ./dist -type f -name '*.zip' | wc -l)" -gt 0
+            test "$(find ./dist -type f -name '*.exe' | wc -l)" -gt 0
+          fi
+          find ./dist -type f -printf '%f\n' 2>/dev/null || true
+
+      - name: Upload preview packages for user testing
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wonderx-flclash-091-${{ matrix.platform }}-${{ matrix.arch }}
+          path: |
+            dist/**/*.apk
+            dist/**/*.exe
+            dist/**/*.zip
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Record compiled package
+        if: success()
+        shell: bash
+        run: |
+          echo "${{ matrix.platform }} test package built from WONDERX $SOURCE_SHA and official FlClash 0.9.1 UI. No live subscription tests performed." >> "$GITHUB_STEP_SUMMARY"
