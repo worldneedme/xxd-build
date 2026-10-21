@@ -71,6 +71,8 @@ jobs:
             fi
           done
 
+          git config user.name "GitHub Audit"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           set +e
           git merge --no-commit --no-ff "$upstream_ref" >"$RUNNER_TEMP/merge.log" 2>&1
           merge_status=$?
