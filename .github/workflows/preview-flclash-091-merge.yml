@@ -199,7 +199,8 @@ jobs:
           set -euo pipefail
           for command in 'go test . -count="$REGRESSION_ROUNDS"' 'go vet . ./cmd/...' 'env GOOS=android GOARCH=arm64 go vet -tags=with_gvisor . ./mobile ./tun ./platform'; do
             if ! bash -c "$command" > "$RUNNER_TEMP/go-wrapper.log" 2>&1; then
-              grep -A 10 -E '^--- FAIL|^# |^.*\.go:[0-9]+:' "$RUNNER_TEMP/go-wrapper.log" | head -n 80 || true
+              echo "Failed command: $command"
+              tail -n 65 "$RUNNER_TEMP/go-wrapper.log"
               exit 1
             fi
           done
