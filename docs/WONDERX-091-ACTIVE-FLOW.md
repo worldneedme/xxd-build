@@ -17,15 +17,22 @@
 - 391606316：旧 official-base integration 候选构建。
 - 391564347：旧 migration smoke。
 删除重复入口 .github/workflows/materialize-v1-091.yml；
-保留 preview-flclash-091-merge.yml 作为当前源码实体化入口，禁止无故重跑旧 prepare。
+原 preview-flclash-091-merge.yml 已转为唯一的完整源码验收入口（workflow ID 391328108）；源码实体化阶段已完成，禁止重跑旧 prepare。
 未删除历史运行日志、分支、Release 或可用回滚包；停用入口可明确重新启用，删除文件可从 Git 提交恢复。
 没有其他进行中的旧工作流需要取消。
 
 ## 后续验收
-v1-091-validate.yml 直接检出固定完整源码 SHA，不在每次构建中重新拼接源码。
+preview-flclash-091-merge.yml 直接检出固定完整源码 SHA，不在每次构建中重新拼接源码。重复的 v1-091-validate.yml 也已删除，只保留一个入口。
 先运行 analyzer、行为/布局与核心平台回归、自定义协议测试，再修复真实失败。
 最终同一源码 SHA 完成五轮验收，然后 Windows setup.exe/ZIP 与 Android arm64 APK。
 当前不能声称五轮验收、安装启动或发布已完成。
 Android 原签名 Secret 缺失，不能声称覆盖安装兼容。
 源码仓库始终 PRIVATE；构建仓库临时 PUBLIC，交付后恢复 PRIVATE。
 不修改任何服务器、订阅面板、DNS 或生产节点。
+
+## 首轮记录
+https://github.com/worldneedme/xxd-build/actions/runs/39613961183 ：FAILED。
+静态检查发现 current_node_name.dart 未使用导入，已修复。
+Go 包装层 go test . 失败，日志展示需定位具体断言，未跳过或放宽测试。
+首页展示测试已迁移至节点名称和不泄露公网 IP 的契约，保留详情、重试和启停检查。
+云端格式化运行：https://github.com/worldneedme/xxd-build/actions/runs/39614419868 。
