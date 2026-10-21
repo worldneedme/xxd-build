@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 80
     env:
-      SOURCE_SHA: '8f2341a5c59c3177509079610b7f2fd261dbda84'
+      SOURCE_SHA: 'a3df178f3c923e5d044fb6a17089debe795af4f0'
       UPSTREAM_TAG: v0.9.1
     steps:
       - name: Checkout private source commit
@@ -61,7 +61,7 @@ jobs:
           if grep -q '^hooks:' pubspec.yaml; then
             yq -i '.hooks.user_defines.setup.build_assets = false | .hooks.user_defines.rust_api.build_assets = false' pubspec.yaml
           fi
-          flutter test test/wonderx_brand_contract_test.dart test/widgets/navigation_dock_test.dart test/views/dashboard/layout_test.dart test/views/theme_test.dart test/database/migration_v1_to_v2_test.dart --reporter expanded
+          flutter test test/wonderx_brand_contract_test.dart test/widgets/navigation_dock_test.dart test/views/dashboard/layout_test.dart test/views/theme_test.dart test/database/migration_v1_to_v2_test.dart test/wonderx_protocol_editor_contract_test.dart --reporter expanded
 
       - name: Setup Go 1.27
         uses: actions/setup-go@v5
@@ -99,7 +99,7 @@ jobs:
             os: windows-2022
             arch: amd64
     env:
-      SOURCE_SHA: '8f2341a5c59c3177509079610b7f2fd261dbda84'
+      SOURCE_SHA: 'a3df178f3c923e5d044fb6a17089debe795af4f0'
       NAIVE_VERSION: 'v154.0.8037.49-3'
       NAIVE_APK_SHA256: 'c65ecdd032a05d85884eed03e231b23c6feff6b59b1e7de7aa1591ba7d692f0a'
     steps:
@@ -175,17 +175,7 @@ jobs:
             test "$(find ./dist -type f -name '*.zip' | wc -l)" -gt 0
             test "$(find ./dist -type f -name '*.exe' | wc -l)" -gt 0
             # Building an EXE and ZIP is not enough: preserve the V1 Naive helper.
-            python - <<'PY'
-            import glob, os, zipfile
-            archives = glob.glob("dist/**/*.zip", recursive=True)
-            assert archives, "no Windows ZIP artifact"
-            for archive in archives:
-                with zipfile.ZipFile(archive) as package:
-                    names = {name.replace("\\", "/").lower() for name in package.namelist()}
-                    assert "protocol-helpers/naive.exe" in names, f"NaiveProxy helper missing from {archive}"
-                    assert "flclashcore.exe" in names, f"custom Mihomo core missing from {archive}"
-            print("WONDERX Windows custom core and NaiveProxy helper packaged")
-            PY
+            python -c 'import glob,zipfile,sys; zs=glob.glob("dist/**/*.zip",recursive=True); ok=bool(zs) and all({"flclashcore.exe","protocol-helpers/naive.exe"}.issubset({n.lower().replace(chr(92),"/") for n in zipfile.ZipFile(p).namelist()}) for p in zs); print("WONDERX ZIP includes core + NaiveProxy helper:",ok); sys.exit(0 if ok else 2)'
           fi
           find ./dist -type f -printf '%f\n' 2>/dev/null || true
 
