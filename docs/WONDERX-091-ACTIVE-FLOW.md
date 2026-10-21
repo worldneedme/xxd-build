@@ -36,3 +36,13 @@ https://github.com/worldneedme/xxd-build/actions/runs/39613961183 ：FAILED。
 Go 包装层 go test . 失败，日志展示需定位具体断言，未跳过或放宽测试。
 首页展示测试已迁移至节点名称和不泄露公网 IP 的契约，保留详情、重试和启停检查。
 云端格式化运行：https://github.com/worldneedme/xxd-build/actions/runs/39614419868 。
+
+## 当前接续点
+- 唯一启用的融合验收 workflow：391328108 / preview-flclash-091-merge.yml。
+- 删除文件后 GitHub 稍晚注册出的重复 workflow 391785166 已另外停用。
+- 当前候选 SHA：9abeb8f210ac658a1c410bd8aa2feb37cbfc165c。
+- 当前完整回归：https://github.com/worldneedme/xxd-build/actions/runs/39615033204 ，RUNNING。
+- 当前候选的格式与 analyzer 已通过，Flutter 全套测试运行中；Go/native 尚待结果。
+- Go 首轮两项失败已定位：common_test.go 仍固定上游 gstatic 默认 URL；已改为精确检查 V1 的 google.cn 默认 URL，没有删测试或降低断言。
+- 云端格式化曾因未解析包语言版本而与验收格式不一致；格式化阶段已先执行 flutter pub get，第二次格式化运行 39614785796 通过。
+- 接续先查本次 run，不重跑已完成的源码实体化，不从旧分支构建，不重跑部署/prepare。
