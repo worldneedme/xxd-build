@@ -51,13 +51,16 @@ jobs:
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           test "$(git ls-remote origin "refs/heads/$target" | cut -f1)" = "$SOURCE_SHA"
           flutter pub get > "$RUNNER_TEMP/format-pub.log" 2>&1
+          yq -i '.hooks.user_defines.setup.build_assets = false | .hooks.user_defines.rust_api.build_assets = false' pubspec.yaml
+          dart run build_runner build --delete-conflicting-outputs > "$RUNNER_TEMP/generate.log" 2>&1 || { tail -n 25 "$RUNNER_TEMP/generate.log"; exit 1; }
+          git restore -- pubspec.yaml
           dart format lib test tool plugins setup.dart > "$RUNNER_TEMP/format.log" 2>&1
           git diff --check
           git add --update -- lib test tool plugins setup.dart
           if ! git diff --cached --quiet; then
             git config user.name github-actions
             git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-            git commit -m "style: format node-name dashboard regressions" > "$RUNNER_TEMP/commit.log"
+            git commit -m "chore: regenerate and format reviewed v1 integration changes" > "$RUNNER_TEMP/commit.log"
             git push origin "HEAD:refs/heads/$target"
           fi
           echo "Formatted source SHA: $(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
