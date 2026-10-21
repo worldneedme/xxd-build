@@ -49,7 +49,7 @@ if (Test-Path -LiteralPath $appSupportDirectory) {
   throw 'The isolated runner already has an application support directory; refusing to overwrite its preferences.'
 }
 New-Item -ItemType Directory -Path $appSupportDirectory | Out-Null
-$preferences = @{ 'flutter.config' = '{"appSettingProps":{"acceptedDisclaimerVersion":1,"autoCheckUpdate":false},"themeProps":{}}' }
+$preferences = @{ 'flutter.config' = '{"appSettingProps":{"autoCheckUpdate":false},"themeProps":{}}' }
 $preferences | ConvertTo-Json -Compress | Set-Content -LiteralPath (Join-Path $appSupportDirectory 'shared_preferences.json') -NoNewline -Encoding utf8
 Set-Content -LiteralPath (Join-Path $appSupportDirectory '.ci-smoke-owner') -Value $env:GITHUB_RUN_ID -NoNewline -Encoding ascii
 $preexistingPipeNames = @([IO.Directory]::GetFiles('\\.\pipe\') | ForEach-Object { [IO.Path]::GetFileName($_) })
@@ -163,7 +163,12 @@ for ($second = 0; $second -lt 20; $second++) {
   }
   Start-Sleep -Seconds 1
 }
-Write-Host 'Windows install/start smoke passed: required files, app/Core remained live, and installed Core answered a read-only JSON-RPC probe.'
+$savedPreferences = Get-Content -LiteralPath (Join-Path $appSupportDirectory 'shared_preferences.json') -Raw | ConvertFrom-Json
+$savedConfig = $savedPreferences.'flutter.config' | ConvertFrom-Json
+if ($savedConfig.appSettingProps.acceptedDisclaimerVersion -gt 0) {
+  throw 'Fresh startup must not fabricate disclaimer acceptance.'
+}
+Write-Host 'Windows fresh-start smoke passed without pre-accepted terms: actual install, app/Core stability, read-only RPC and unchanged consent state.'
 
 $startupLog = @(
   Get-Content -LiteralPath $stdout -ErrorAction SilentlyContinue

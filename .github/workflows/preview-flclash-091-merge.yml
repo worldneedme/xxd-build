@@ -419,6 +419,7 @@ jobs:
           checks = json.loads((dist / 'PACKAGE-CHECKS.json').read_text())
           if platform == 'windows':
               checks['actual_install_start_and_core_rpc'] = 'PASSED'
+              checks['fresh_start_without_disclaimer_acceptance'] = 'PASSED'
               checks['user_device_test'] = 'PENDING_DEVICE_TEST'
           elif (dist / 'APK-SIGNATURES.txt').exists():
               shutil.copy2(dist / 'APK-SIGNATURES.txt', stage / 'APK-SIGNATURES.txt')
@@ -492,13 +493,15 @@ jobs:
             echo 'Refusing to overwrite an existing release'; exit 1
           fi
           {
-            echo '# WONDERX V1 — official FlClash 0.9.1 UI integration'
+            echo '# WONDERX V1 — consumer dashboard and consistent V1 branding'
             echo
             echo "Source: $SOURCE_SHA"
             echo "Workflow: $GITHUB_SHA"
             echo "Validation and build: https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
             echo
-            echo 'Official 0.9.1 UI/platform base; WONDERX V1 identity and custom protocols retained.'
+            echo 'Official 0.9.1 UI/platform base; WONDERX V1 identity and Mieru/Juicity-Hopping/NaiveProxy/Sudoku retained.'
+            echo 'V1 tray logo, simplified dashboard, aligned node name/runtime, gold expanded-sidebar motto, V1 window header.'
+            echo 'First launch enters the app directly: mandatory disclaimer and typed-restatement screens removed. Read-only legal information remains in Tools; OS VPN permissions remain.'
             echo 'Five full Flutter regression rounds, native protocol checks, plugin checks, Windows installer/start/Core RPC, and Android native package/JVM checks passed.'
             echo 'Windows includes setup.exe and ZIP. Android is arm64-v8a, TEST signing with .dev app id; not promised to overwrite your existing signed app.'
             echo 'Windows/Android user-device connections and iPhone tests remain PENDING_DEVICE_TEST.'
