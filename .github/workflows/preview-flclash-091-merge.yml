@@ -225,3 +225,269 @@ jobs:
           done
       - name: Record evidence
         run: echo "Go wrapper, custom protocols and Rust PASS; source $SOURCE_SHA" >> "$GITHUB_STEP_SUMMARY"
+
+  packages:
+    name: Checked ${{ matrix.platform }} delivery package
+    if: inputs.package_release == true && inputs.normalize_only != true && inputs.regression_rounds == '5'
+    needs: [flutter, native]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 110
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: android
+            os: ubuntu-latest
+            arch: arm64-v8a
+          - platform: windows
+            os: windows-2022
+            arch: amd64
+    env:
+      NAIVE_VERSION: 'v154.0.8037.49-3'
+      NAIVE_APK_SHA256: 'c65ecdd032a05d85884eed03e231b23c6feff6b59b1e7de7aa1591ba7d692f0a'
+    steps:
+      - name: Checkout fixed private source
+        uses: actions/checkout@v4
+        with:
+          repository: worldneedme/xxdmanfl0609
+          ref: ${{ env.SOURCE_SHA }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          persist-credentials: false
+      - name: Checkout public validation scripts only
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: ci-tools
+          persist-credentials: false
+      - name: Check immutable source and hooks
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git config --global core.longpaths true
+          python - <<'PY'
+          import re
+          from pathlib import Path
+          text = Path('pubspec.yaml').read_text()
+          if len(re.findall(r'build_assets:\s*true', text)) != 2:
+              raise SystemExit('Both native build hooks must remain enabled for packaging')
+          PY
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.1'
+          cache-dependency-path: |
+            core/go.sum
+            core/Clash.Meta/go.sum
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.47.7'
+          cache: true
+      - uses: actions/setup-java@v4
+        if: matrix.platform == 'android'
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v6
+        if: matrix.platform == 'android'
+      - uses: nttld/setup-ndk@v1
+        if: matrix.platform == 'android'
+        id: setup-ndk
+        with:
+          ndk-version: r28c
+          add-to-path: true
+          link-to-sdk: true
+
+      - name: Fetch verified pinned Naive Android helper
+        if: matrix.platform == 'android'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          apk="naiveproxy-plugin-$NAIVE_VERSION-arm64-v8a.apk"
+          digest=$(gh api "repos/klzgrad/naiveproxy/releases/tags/$NAIVE_VERSION" --jq ".assets[] | select(.name == \"$apk\") | .digest")
+          test "$digest" = "sha256:$NAIVE_APK_SHA256"
+          curl -fLsS --retry 4 -o "$RUNNER_TEMP/$apk" "https://github.com/klzgrad/naiveproxy/releases/download/$NAIVE_VERSION/$apk"
+          echo "$NAIVE_APK_SHA256  $RUNNER_TEMP/$apk" | sha256sum -c -
+          mkdir -p android/app/src/main/jniLibs/arm64-v8a
+          unzip -p "$RUNNER_TEMP/$apk" lib/arm64-v8a/libnaive.so > android/app/src/main/jniLibs/arm64-v8a/libnaive.so
+          test -s android/app/src/main/jniLibs/arm64-v8a/libnaive.so
+
+      - name: Compile and package immutable source
+        shell: bash
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: |
+          set -euo pipefail
+          flutter pub get > "$RUNNER_TEMP/package-pub.log" 2>&1
+          if [ "${{ matrix.platform }}" = android ]; then
+            command=(dart setup.dart android --arch arm64 -v)
+          else
+            command=(dart setup.dart windows -v)
+          fi
+          if ! "${command[@]}" > "$RUNNER_TEMP/package-build.log" 2>&1; then
+            grep -A 5 -E '(error:|Error:|FAILURE:|What went wrong:|failed|Exception:)' "$RUNNER_TEMP/package-build.log" | tail -n 65 || true
+            exit 1
+          fi
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+      - name: Windows service helper regression
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          cargo test --manifest-path services/helper/Cargo.toml --features windows-service
+          if ($LASTEXITCODE -ne 0) { throw 'Windows helper regression failed' }
+      - name: Android JVM lifecycle regressions
+        if: matrix.platform == 'android'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! (cd android && bash ./gradlew :common:testDebugUnitTest :service:testDebugUnitTest :app:testDebugUnitTest -Ptarget-platform=android-arm64 --no-daemon) > "$RUNNER_TEMP/android-tests.log" 2>&1; then
+            tail -n 45 "$RUNNER_TEMP/android-tests.log"; exit 1
+          fi
+          python3 - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          for module in ('common', 'service', 'app'):
+              reports = list((Path('build') / module / 'test-results/testDebugUnitTest').glob('TEST-*.xml'))
+              if not reports:
+                  raise SystemExit('Missing JVM test reports for ' + module)
+              suites = [ET.parse(p).getroot() for p in reports]
+              total = sum(int(s.get('tests', 0)) for s in suites)
+              skipped = sum(int(s.get('skipped', 0)) for s in suites)
+              failures = sum(int(s.get(k, 0)) for s in suites for k in ('failures', 'errors'))
+              if failures or total <= skipped:
+                  raise SystemExit('Android JVM test failure: ' + module)
+              print(module, total - skipped, 'tests passed')
+          PY
+      - name: Inspect platform package structure and identity
+        shell: bash
+        run: python ci-tools/.github/scripts/wonderx_091_check_packages.py ${{ matrix.platform }}
+      - name: Install and start the actual Windows setup package
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: '& ./ci-tools/.github/scripts/wonderx_091_windows_smoke.ps1'
+      - name: Clean only this Windows test installation
+        if: always() && matrix.platform == 'windows'
+        shell: pwsh
+        run: '& ./ci-tools/.github/scripts/wonderx_091_windows_cleanup.ps1'
+      - name: Stage checked packages and provenance only
+        shell: bash
+        env:
+          BUILD_PLATFORM: ${{ matrix.platform }}
+          BUILD_ARCH: ${{ matrix.arch }}
+          WORKFLOW_SHA: ${{ github.sha }}
+          BUILD_RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib, json, os, shutil, subprocess
+          from pathlib import Path
+          platform = os.environ['BUILD_PLATFORM']
+          dist, stage = Path('dist'), Path('release-output')
+          stage.mkdir()
+          packages = [p for p in dist.rglob('*') if p.is_file() and
+              (p.suffix == '.apk' if platform == 'android' else
+               p.suffix == '.zip' or p.name.endswith('-setup.exe'))]
+          expected = 1 if platform == 'android' else 2
+          if len(packages) != expected:
+              raise SystemExit(f'Expected {expected} delivery files, found {len(packages)}')
+          entries = []
+          for package in packages:
+              target = stage / package.name
+              shutil.copy2(package, target)
+              entries.append({'filename':target.name,'size_bytes':target.stat().st_size,
+                              'sha256':hashlib.sha256(target.read_bytes()).hexdigest()})
+          checks = json.loads((dist / 'PACKAGE-CHECKS.json').read_text())
+          if platform == 'windows':
+              checks['actual_install_start_and_core_rpc'] = 'PASSED'
+              checks['user_device_test'] = 'PENDING_DEVICE_TEST'
+          elif (dist / 'APK-SIGNATURES.txt').exists():
+              shutil.copy2(dist / 'APK-SIGNATURES.txt', stage / 'APK-SIGNATURES.txt')
+          manifest = {
+              'client_source_sha':os.environ['SOURCE_SHA'],
+              'official_ui_base_sha':'8d4f9744948751f1273fe871e1d05276fac09b0e',
+              'build_workflow_sha':os.environ['WORKFLOW_SHA'],
+              'build_run_url':os.environ['BUILD_RUN_URL'],
+              'platform':platform,'architecture':os.environ['BUILD_ARCH'],
+              'regression_rounds':5,
+              'toolchains':{'flutter':'3.47.7','go':'1.27.1','ndk':'r28c' if platform == 'android' else None},
+              'naive_android_version':os.environ['NAIVE_VERSION'] if platform == 'android' else None,
+              'naive_upstream_apk_sha256':os.environ['NAIVE_APK_SHA256'] if platform == 'android' else None,
+              'checks_completed':checks,'packages':entries,
+              'real_device_connection_tests':'PENDING_DEVICE_TEST',
+          }
+          (stage / f'MANIFEST-{platform}.json').write_text(json.dumps(manifest,indent=2)+'\n')
+          (stage / f'SHA256SUMS-{platform}.txt').write_text(
+              ''.join(f"{e['sha256']}  {e['filename']}\n" for e in entries))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wonderx-091-checked-${{ matrix.platform }}-${{ github.run_id }}
+          path: release-output/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish both checked platforms together
+    needs: [flutter, native, packages]
+    if: inputs.package_release == true && inputs.normalize_only != true && inputs.regression_rounds == '5'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wonderx-091-checked-*-${{ github.run_id }}
+          path: release-files
+          merge-multiple: true
+      - name: Verify source consistency and checksums
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^wonderx-v1-0\.9\.1-[a-zA-Z0-9._-]+$ ]]
+          python3 - <<'PY'
+          import hashlib,json,os
+          from pathlib import Path
+          root=Path('release-files')
+          for platform in ('windows','android'):
+              manifest=json.loads((root/f'MANIFEST-{platform}.json').read_text())
+              assert manifest['client_source_sha']==os.environ['SOURCE_SHA']
+              assert manifest['regression_rounds']==5
+              for entry in manifest['packages']:
+                  p=root/entry['filename']
+                  assert p.stat().st_size==entry['size_bytes']
+                  assert hashlib.sha256(p.read_bytes()).hexdigest()==entry['sha256']
+          assert len(list(root.glob('*-setup.exe')))==1
+          assert len(list(root.glob('*.zip')))==1
+          assert len(list(root.glob('*.apk')))==1
+          PY
+      - name: Create real release after all checks passed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo 'Refusing to overwrite an existing release'; exit 1
+          fi
+          {
+            echo '# WONDERX V1 — official FlClash 0.9.1 UI integration'
+            echo
+            echo "Source: $SOURCE_SHA"
+            echo "Workflow: $GITHUB_SHA"
+            echo "Validation and build: https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo
+            echo 'Official 0.9.1 UI/platform base; WONDERX V1 identity and custom protocols retained.'
+            echo 'Five full Flutter regression rounds, native protocol checks, plugin checks, Windows installer/start/Core RPC, and Android native package/JVM checks passed.'
+            echo 'Windows includes setup.exe and ZIP. Android is arm64-v8a, TEST signing with .dev app id; not promised to overwrite your existing signed app.'
+            echo 'Windows/Android user-device connections and iPhone tests remain PENDING_DEVICE_TEST.'
+            echo 'This release makes no server, subscription panel, DNS or production changes.'
+            echo 'See attached manifests and SHA256 checksums for exact provenance.'
+          } > "$RUNNER_TEMP/release-notes.md"
+          gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease \
+            --title "WONDERX V1 0.9.1 — $RELEASE_TAG" --notes-file "$RUNNER_TEMP/release-notes.md" release-files/*
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json url,assets --jq '{url,assets:[.assets[]|{name,size,url}]}'
