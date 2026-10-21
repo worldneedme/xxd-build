@@ -51,9 +51,9 @@ jobs:
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           test "$(git ls-remote origin "refs/heads/$target" | cut -f1)" = "$SOURCE_SHA"
           flutter pub get > "$RUNNER_TEMP/format-pub.log" 2>&1
-          dart format test/views/dashboard/current_outbound_test.dart > "$RUNNER_TEMP/format.log" 2>&1
+          dart format lib test tool plugins setup.dart > "$RUNNER_TEMP/format.log" 2>&1
           git diff --check
-          git add test/views/dashboard/current_outbound_test.dart
+          git add --update -- lib test tool plugins setup.dart
           if ! git diff --cached --quiet; then
             git config user.name github-actions
             git config user.email 41898282+github-actions[bot]@users.noreply.github.com
