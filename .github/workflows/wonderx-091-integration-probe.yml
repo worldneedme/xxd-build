@@ -1,0 +1,120 @@
+name: WONDERX FlClash 0.9.1 integration probe
+
+on:
+  push:
+    branches:
+      - work/wonderx-091-validation
+    paths:
+      - .github/workflows/wonderx-091-integration-probe.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    env:
+      SOURCE_SHA: '2d90609381e69ee586e8945a69d72b9baba7860d'
+      UPSTREAM_TAG: 'v0.9.1'
+    steps:
+      - name: Checkout immutable private WONDERX upgrade source
+        uses: actions/checkout@v4
+        with:
+          repository: worldneedme/xxdmanfl0609
+          ref: ${{ env.SOURCE_SHA }}
+          ssh-key: ${{ secrets.SOURCE_READ_KEY }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Merge official 0.9.1 without touching private repository
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git config user.name 'WONDERX CI'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git remote add official https://github.com/chen08209/FlClash.git
+          git fetch --no-tags official "+refs/tags/$UPSTREAM_TAG:refs/tags/wonderx-upstream"
+          original_core_tree=$(git rev-parse HEAD:core/Clash.Meta)
+          original_icon_sha=$(git rev-parse HEAD:assets/images/icon.png)
+          original_ico_sha=$(git rev-parse HEAD:assets/images/icon.ico)
+          set +e
+          git merge --no-commit --no-ff -X ours refs/tags/wonderx-upstream > "$RUNNER_TEMP/merge-status.log" 2>&1
+          merge_exit=$?
+          set -e
+          echo "Merge command exit: $merge_exit"
+          if (( merge_exit > 1 )); then
+            echo "Unexpected merge error"; exit 1
+          fi
+          git ls-files -u | awk -F '\t' '{print $2}' | sort -u > "$RUNNER_TEMP/unmerged.txt"
+          echo "Unmerged paths: $(wc -l < "$RUNNER_TEMP/unmerged.txt")"
+          while IFS= read -r path; do
+            test -n "$path" || continue
+            echo "Resolving conflict path: $path"
+            case "$path" in
+              core/Clash.Meta~*)
+                git rm -f --cached --ignore-unmatch -- "$path"
+                rm -f -- "$path"
+                ;;
+              *)
+                if git cat-file -e "HEAD:$path" 2>/dev/null; then
+                  git checkout --ours -- "$path"
+                  git add -- "$path"
+                else
+                  git rm -f --cached --ignore-unmatch -- "$path"
+                  rm -f -- "$path"
+                fi
+                ;;
+            esac
+          done < "$RUNNER_TEMP/unmerged.txt"
+          test -z "$(git ls-files -u)"
+          git restore --source=HEAD --staged --worktree -- assets/images/icon.png assets/images/icon.ico
+          git restore --source=HEAD --staged --worktree -- core/Clash.Meta
+          test "$(git rev-parse :core/Clash.Meta)" = "$original_core_tree" || {
+            echo "Private custom core was modified"; exit 1;
+          }
+          test "$(git rev-parse :assets/images/icon.png)" = "$original_icon_sha"
+          test "$(git rev-parse :assets/images/icon.ico)" = "$original_ico_sha"
+          git diff --cached --shortstat
+          git commit -m "test: merge upstream FlClash 0.9.1 preserving WONDERX core and icons" >/dev/null
+          test "$(git rev-parse HEAD:core/Clash.Meta)" = "$original_core_tree"
+          grep -q 'displayAppName' lib/common/constant.dart
+          grep -q 'func NewJuicity(' core/Clash.Meta/adapter/outbound/juicity_native.go
+          grep -q 'func NewNaiveProxy(' core/Clash.Meta/adapter/outbound/helper_proxy.go
+          {
+            echo "## Temporary, private-source 0.9.1 integration probe"
+            echo "- Source: $SOURCE_SHA"
+            echo "- Official upstream: $UPSTREAM_TAG"
+            echo "- Temporary merged commit: $(git rev-parse HEAD)"
+            echo "- Custom Go core and WONDERX app icon blobs: unchanged"
+            echo "- This run does not push merged source or upload source archives"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.47.1'
+          cache: true
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Analyze integrated UI and app
+        run: flutter analyze --no-fatal-infos
+
+      - name: Run Flutter unit and widget tests without native build hooks
+        shell: bash
+        run: |
+          if grep -q '^hooks:' pubspec.yaml; then
+            yq -i '.hooks.user_defines.setup.build_assets = false | .hooks.user_defines.rust_api.build_assets = false' pubspec.yaml
+          fi
+          flutter test --reporter expanded
+
+      - name: Record successful static smoke
+        if: success()
+        run: |
+          echo "- Flutter pub get/analyze/test: PASS" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Actual installation and live protocol connectivity: NOT TESTED" >> "$GITHUB_STEP_SUMMARY"
