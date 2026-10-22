@@ -113,3 +113,17 @@ five-round hosted gates, full Windows core+Helper+manifest and Android JNI rebui
 No new core/UI behavior changed after immutable build source0b6781447ed133ac9967cacc52bd628001fb4c51.
 Current core_version declarationv1.19.32; vendored core tree6a9b8de999c20f5061e28a9d15dfd89a697436b6.
 Do not mistake the docs-only branch HEAD for a different software candidate.
+
+## Final handoff — 2026-10-22 UTC
+
+Final immutable client source: `6e9e1f52fb63bc5051486831d4dba7908d4b6c1d`; installer path-normalization fix: `55b0f01b98440aba1014f14029bc14f8bb712477`; matching regression assertion: final source SHA above. The previous retry `39702560402` exposed a stale source assertion after the Inno installer change; the assertion was updated to cover `ExpandFileName`, then run `39703204209` completed successfully.
+
+Run: https://github.com/worldneedme/xxd-build/actions/runs/39703204209 — five full Flutter rounds, native/custom protocol checks, Windows real setup install/start/Core RPC/legacy shortcut cleanup, Android arm64 structure/JVM/signature checks, and paired publish passed.
+
+Release: https://github.com/worldneedme/xxd-build/releases/tag/wonderx-v1-0.9.1-consumer-ui-v1-installer-20261022-0101
+
+- Windows EXE: https://github.com/worldneedme/xxd-build/releases/download/wonderx-v1-0.9.1-consumer-ui-v1-installer-20261022-0101/FlClash-0.9.1-windows-amd64-setup.exe — 48,215,955 bytes; SHA256 `ae6a28de85598dbcc7c3f59c973647862d569e1fea938c07e0482e4776d22157`.
+- Windows ZIP: https://github.com/worldneedme/xxd-build/releases/download/wonderx-v1-0.9.1-consumer-ui-v1-installer-20261022-0101/FlClash-0.9.1-windows-amd64.zip — 76,821,621 bytes; SHA256 `71bb4fc2f33685f8bf8e8ea31e7714a02d26d57e65a03a9f0c85eeee7d6bb8da`.
+- Android arm64 APK: https://github.com/worldneedme/xxd-build/releases/download/wonderx-v1-0.9.1-consumer-ui-v1-installer-20261022-0101/FlClash-0.9.1-android-arm64-v8a.apk — 65,234,418 bytes; SHA256 `1e87b0491acf642aa18e7f2b3d00b4988ada8f5e18752d645fde1cb911b50bed`.
+
+Android is signed with the existing `.dev` test identity, not the original release signature; overwrite installation is not assured. Windows/Android user-device connection and iPhone Shadowrocket remain pending. `xxdmanfl0609` and `xxd-build` were verified PRIVATE after release. No production/server/panel/DNS/firewall/node changes.
