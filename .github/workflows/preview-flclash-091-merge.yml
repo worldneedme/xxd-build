@@ -141,7 +141,7 @@ jobs:
         run: |
           set -euo pipefail
           yq -i '.hooks.user_defines.setup.build_assets = false' pubspec.yaml
-          if ! flutter test test/views/disclaimer_test.dart test/manager/window_header_test.dart test/views/dashboard/connections_table_test.dart test/views/dashboard/start_single_click_test.dart test/views/dashboard/current_outbound_test.dart test/providers/setup_action_test.dart test/providers/action_test.dart test/providers/outbound_ip_test.dart test/providers/routed_probe_test.dart test/widgets/wonderx_brand_test.dart --reporter expanded > "$RUNNER_TEMP/focused-test.log" 2>&1; then
+          if ! timeout 240s flutter test test/views/disclaimer_test.dart test/manager/window_header_test.dart test/views/dashboard/connections_table_test.dart test/views/dashboard/start_single_click_test.dart test/views/dashboard/current_outbound_test.dart test/providers/setup_action_test.dart test/providers/action_test.dart test/providers/outbound_ip_test.dart test/providers/routed_probe_test.dart test/widgets/wonderx_brand_test.dart --reporter expanded --timeout 45s > "$RUNNER_TEMP/focused-test.log" 2>&1; then
             grep -m 4 -A 24 'EXCEPTION CAUGHT' "$RUNNER_TEMP/focused-test.log" || true
             tail -n 160 "$RUNNER_TEMP/focused-test.log"
             exit 1
