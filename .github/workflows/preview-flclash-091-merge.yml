@@ -273,8 +273,8 @@ jobs:
             os: windows-2022
             arch: amd64
     env:
-      NAIVE_VERSION: 'v154.0.8037.49-3'
-      NAIVE_APK_SHA256: 'c65ecdd032a05d85884eed03e231b23c6feff6b59b1e7de7aa1591ba7d692f0a'
+      NAIVE_VERSION: 'v154.0.8037.49-5'
+      NAIVE_APK_SHA256: '3a532e6894d87c1fca5c527d3598892627829c76cb5b75ed831555f384841bd0'
     steps:
       - name: Checkout fixed private source
         uses: actions/checkout@v4
