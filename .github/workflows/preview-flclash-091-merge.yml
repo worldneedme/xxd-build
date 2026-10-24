@@ -510,6 +510,9 @@ jobs:
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo 'Refusing to overwrite an existing release'; exit 1
           fi
+          apk=$(basename release-files/*.apk)
+          version=${apk#WONDERX-V1-}; version=${version%%-android-*}
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           {
             echo '# WONDERX V1 — reliable single-click start and aligned dashboard'
             echo
@@ -517,7 +520,7 @@ jobs:
             echo "Workflow: $GITHUB_SHA"
             echo "Validation and build: https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
             echo
-            echo 'Official 0.9.1 UI/platform base; WONDERX V1 identity and Mieru/Juicity-Hopping/NaiveProxy/Sudoku retained.'
+            echo "Official $version UI/platform base; WONDERX V1 identity and Mieru/Juicity-Hopping/NaiveProxy/Sudoku retained."
             echo 'Windows installer and Installed Apps display WONDERX V1; the default desktop shortcut is V1. App identity and existing data location retained.'
             echo 'Single-click startup waits for Core readiness, shows progress, prevents accidental duplicate toggles and permits retry after failure. No-profile Start opens import. Country badges align with CJK node names; the gold sidebar motto stacks one word per line. A compact proxy-selection shortcut keeps diagnostics off the home page.'
             echo 'The former organization slot now reminds users to keep subscriptions updated; all seven locales are included.'
@@ -529,5 +532,5 @@ jobs:
             echo 'See attached manifests and SHA256 checksums for exact provenance.'
           } > "$RUNNER_TEMP/release-notes.md"
           gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease \
-            --title "WONDERX V1 0.9.1 — $RELEASE_TAG" --notes-file "$RUNNER_TEMP/release-notes.md" release-files/*
+            --title "WONDERX V1 $version — $RELEASE_TAG" --notes-file "$RUNNER_TEMP/release-notes.md" release-files/*
           gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json url,assets --jq '{url,assets:[.assets[]|{name,size,url}]}'
