@@ -1,0 +1,163 @@
+name: Compose FlClash 0.9.2 upgrade
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Full private source SHA (compose base, or branch head to regenerate)
+        required: true
+        type: string
+      target_branch:
+        description: New private branch, must start with codex/flclash-0.9.2-
+        required: true
+        default: codex/flclash-0.9.2-upgrade-20261024
+        type: string
+      mode:
+        description: compose = 3-way apply official 0.9.1->0.9.2 app and core diffs; regenerate = codegen + format on the branch head
+        required: true
+        default: compose
+        type: choice
+        options: [compose, regenerate]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: compose-flclash-092
+  cancel-in-progress: false
+
+env:
+  SOURCE_SHA: ${{ inputs.source_sha }}
+  TARGET_BRANCH: ${{ inputs.target_branch }}
+  UPSTREAM_FROM: v0.9.1
+  UPSTREAM_TO: v0.9.2
+  CORE_FROM: 8380d0e7462f061a964323e9bf3129a236fcc5d5
+  CORE_TO: c5062921054902b25215a6a933e72ccd714c9bfa
+
+jobs:
+  compose:
+    if: inputs.mode == 'compose'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: worldneedme/xxdmanfl0609
+          ref: ${{ inputs.source_sha }}
+          ssh-key: ${{ secrets.V1_START_ALIGNMENT_WRITE_KEY }}
+          fetch-depth: 1
+      - name: Three-way apply official diffs, keeping V1 dashboard and brand assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$TARGET_BRANCH" =~ ^codex/flclash-0\.9\.2-[A-Za-z0-9._-]+$ ]]
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test -z "$(git ls-remote origin "refs/heads/$TARGET_BRANCH")"
+          git config user.name github-actions
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+
+          git fetch -q --depth=1 https://github.com/chen08209/FlClash.git \
+            "refs/tags/$UPSTREAM_FROM:refs/tags/up-from" "refs/tags/$UPSTREAM_TO:refs/tags/up-to"
+          git fetch -q --depth=1 https://github.com/chen08209/Clash.Meta.git "$CORE_FROM" "$CORE_TO"
+          test "$(git rev-parse up-from:core/Clash.Meta)" = "$CORE_FROM"
+          test "$(git rev-parse up-to:core/Clash.Meta)" = "$CORE_TO"
+
+          keep=(
+            ':(exclude)core/Clash.Meta'
+            ':(exclude)lib/views/dashboard/**'
+            ':(exclude)assets/images/tray/**'
+            ':(exclude)assets/images/icon.png'
+            ':(exclude)assets_source/images/icon/**'
+            ':(exclude)macos/Runner/Assets.xcassets/AppIcon.appiconset/**'
+            ':(exclude)android/app/src/main/res/**/ic_launcher*'
+            ':(exclude)changelog.json'
+            ':(exclude)CHANGELOG.md'
+          )
+          git diff --binary up-from up-to -- . "${keep[@]}" > "$RUNNER_TEMP/app.patch"
+          git diff --binary "$CORE_FROM" "$CORE_TO" > "$RUNNER_TEMP/core.patch"
+
+          hard=0
+          for part in app core; do
+            args=(--3way --index -v)
+            [[ $part = core ]] && args+=(--directory=core/Clash.Meta)
+            if ! git apply "${args[@]}" "$RUNNER_TEMP/$part.patch" > "$RUNNER_TEMP/$part-apply.log" 2>&1; then
+              # git apply is atomic: a failure with no "Applied patch" line means nothing landed.
+              grep -q '^Applied patch' "$RUNNER_TEMP/$part-apply.log" || { hard=1; echo "$part patch did not apply"; }
+            fi
+            echo "$part: $(grep -c 'cleanly' "$RUNNER_TEMP/$part-apply.log" || true) clean, $(grep -c 'with conflicts' "$RUNNER_TEMP/$part-apply.log" || true) with conflicts"
+          done
+
+          # Generated sources are rebuilt by the regenerate mode, so take upstream's side here.
+          mapfile -t conflicted < <(git diff --name-only --diff-filter=U)
+          for path in "${conflicted[@]}"; do
+            if [[ "$path" == */generated/* || "$path" == lib/l10n/intl/* || "$path" == lib/l10n/l10n.dart || "$path" == *.g.dart || "$path" == *.freezed.dart ]]; then
+              git checkout --theirs -- "$path" && git add -- "$path"
+            fi
+          done
+          mapfile -t remaining < <(git diff --name-only --diff-filter=U)
+
+          git add -A
+          {
+            echo "### Compose 0.9.1 -> 0.9.2"
+            echo "Base: \`$SOURCE_SHA\`"
+            echo "App patch files: $(git diff --name-only up-from up-to -- . "${keep[@]}" | wc -l); core patch files: $(git diff --name-only "$CORE_FROM" "$CORE_TO" | wc -l)"
+            echo "Hard apply failure: $hard"
+            echo "Files left with conflict markers (${#remaining[@]}):"
+            printf -- '- `%s`\n' "${remaining[@]}"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [[ $hard = 1 ]]; then
+            grep -hE '^error:' "$RUNNER_TEMP/app-apply.log" "$RUNNER_TEMP/core-apply.log" | head -n 40 >> "$GITHUB_STEP_SUMMARY" || true
+            exit 1
+          fi
+
+          msg="merge: compose official FlClash 0.9.2 and core $CORE_TO onto V1"
+          if (( ${#remaining[@]} )); then
+            msg="$msg (WIP: ${#remaining[@]} files carry conflict markers)"
+          fi
+          git commit -q -m "$msg" -m "Base $SOURCE_SHA; upstream $UPSTREAM_FROM..$UPSTREAM_TO; Clash.Meta $CORE_FROM..$CORE_TO. V1 dashboard, tray, launcher and brand icons kept."
+          git push -q origin "HEAD:refs/heads/$TARGET_BRANCH"
+          echo "Composed SHA: \`$(git rev-parse HEAD)\`" >> "$GITHUB_STEP_SUMMARY"
+
+  regenerate:
+    if: inputs.mode == 'regenerate'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: worldneedme/xxdmanfl0609
+          ref: ${{ inputs.source_sha }}
+          ssh-key: ${{ secrets.V1_START_ALIGNMENT_WRITE_KEY }}
+          fetch-depth: 1
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.7'
+          channel: stable
+          cache: true
+      - name: Regenerate, format and commit onto the 0.9.2 branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$TARGET_BRANCH" =~ ^codex/flclash-0\.9\.2-[A-Za-z0-9._-]+$ ]]
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$(git ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)" = "$SOURCE_SHA"
+          ! git grep -nE '^(<<<<<<<|>>>>>>>) ' -- lib test core plugins services android windows tool > /dev/null
+          flutter pub get > "$RUNNER_TEMP/pub.log" 2>&1 || { tail -n 25 "$RUNNER_TEMP/pub.log"; exit 1; }
+          yq -i '.hooks.user_defines.setup.build_assets = false | .hooks.user_defines.rust_api.build_assets = false' pubspec.yaml
+          dart run intl_utils:generate > "$RUNNER_TEMP/l10n.log" 2>&1 || { tail -n 25 "$RUNNER_TEMP/l10n.log"; exit 1; }
+          dart run build_runner build --delete-conflicting-outputs > "$RUNNER_TEMP/generate.log" 2>&1 || { grep -E 'error|Error' "$RUNNER_TEMP/generate.log" | head -n 30; exit 1; }
+          sudo apt-get update -qq > "$RUNNER_TEMP/icons-apt.log" 2>&1
+          sudo apt-get install -y librsvg2-bin >> "$RUNNER_TEMP/icons-apt.log" 2>&1
+          dart run tool/generate_status_icons.dart > "$RUNNER_TEMP/icons.log" 2>&1 || { tail -n 20 "$RUNNER_TEMP/icons.log"; exit 1; }
+          git restore -- pubspec.yaml
+          dart format lib test tool plugins setup.dart > "$RUNNER_TEMP/format.log" 2>&1
+          git add -A -- lib test tool plugins setup.dart assets/images/tray windows/runner/resources/app_icon.ico pubspec.lock
+          if ! git diff --cached --quiet; then
+            git config user.name github-actions
+            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+            git commit -q -m "chore: regenerate and format 0.9.2 integration"
+            git push -q origin "HEAD:refs/heads/$TARGET_BRANCH"
+          fi
+          echo "Regenerated SHA: \`$(git rev-parse HEAD)\`" >> "$GITHUB_STEP_SUMMARY"
